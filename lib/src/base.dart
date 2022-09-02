@@ -1,5 +1,5 @@
 import 'dart:ffi' as ffi;
-import 'package:system_resources/src/dylib.dart';
+import 'package:system_resources_2/src/dylib.dart';
 
 typedef GetCpuLoad = double Function();
 typedef GetMemoryUsage = double Function();

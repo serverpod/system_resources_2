@@ -1,11 +1,12 @@
-name: system_resources
+name: system_resources_2
 description: Provides easy access to system resources (CPU load, memory usage).
-version: 1.5.0
-repository: https://github.com/jonasroussel/system_resources
-homepage: https://github.com/jonasroussel/system_resources#readme
+version: 2.0.0
+repository: https://github.com/serverpod/system_resources_2
+homepage: https://github.com/serverpod/system_resources_2#readme
 
 environment:
   sdk: ">=2.12.0 <3.0.0"
 
 dev_dependencies:
   pedantic: ^1.9.0
+  test: ^1.19.5

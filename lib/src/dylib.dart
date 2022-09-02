@@ -39,7 +39,7 @@ Future<DynamicLibrary> loadLibsysres = () async {
   if (Platform.script.path.endsWith('.snapshot')) {
     objectFile = File.fromUri(Platform.script).parent.path + '/' + _filename();
   } else {
-    final rootLibrary = 'package:system_resources/system_resources.dart';
+    final rootLibrary = 'package:system_resources_2/system_resources_2.dart';
     final build = (await Isolate.resolvePackageUri(Uri.parse(rootLibrary)))
         ?.resolve('build/');
 
