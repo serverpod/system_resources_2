@@ -38,10 +38,29 @@ String _getArch() {
 
   if (Platform.isMacOS) {
     // macOS: arm64 for Apple Silicon, x86_64 for Intel
-    // We try arm64 first on 64-bit, fallback handled by loader
+    final envArch = Platform.environment['TARGETARCH'];
+    if (envArch == 'arm64') return 'arm64';
+    if (envArch == 'amd64') return 'x86_64';
     return is64Bit ? 'arm64' : 'x86_64';
   } else if (Platform.isLinux) {
-    // Linux: x86_64, aarch64, armv7l, i686
+    // Check environment variable first (commonly set in Docker)
+    final envArch = Platform.environment['TARGETARCH'];
+    if (envArch == 'arm64') return 'aarch64';
+    if (envArch == 'amd64') return 'x86_64';
+
+    // Try to detect from /proc/cpuinfo
+    try {
+      final cpuinfo = File('/proc/cpuinfo').readAsStringSync();
+      if (cpuinfo.contains('aarch64') || cpuinfo.contains('ARMv8')) {
+        return 'aarch64';
+      }
+      if (cpuinfo.contains('ARMv7')) {
+        return 'armv7l';
+      }
+    } catch (_) {
+      // Ignore errors
+    }
+
     return is64Bit ? 'x86_64' : 'i686';
   }
   return 'x86_64';
