@@ -2,6 +2,9 @@ import 'dart:io';
 import 'dart:ffi';
 import 'dart:isolate' show Isolate;
 
+/// Detect if running on 64-bit platform by checking pointer size
+bool get _is64Bit => sizeOf<IntPtr>() == 8;
+
 const Set<String> _supported = {
   'linux-x86_64',
   'linux-i686',
@@ -69,8 +72,8 @@ String _detectArchitecture() {
       // /proc/cpuinfo not available or unreadable, fall through to default
     }
     
-    // Fallback: use Platform.is64Bit for basic detection
-    if (Platform.is64Bit) {
+    // Fallback: use pointer size for basic detection
+    if (_is64Bit) {
       // Default to x86_64 for 64-bit Linux if no other info available
       // Users can override with TARGETARCH environment variable
       return 'x86_64';
@@ -79,7 +82,7 @@ String _detectArchitecture() {
     }
   } else if (os == 'macos' || os == 'darwin') {
     // macOS uses different architecture naming
-    if (Platform.is64Bit) {
+    if (_is64Bit) {
       // Check environment variables that might indicate architecture
       // These are commonly set in Docker/build environments
       final envArch = Platform.environment['TARGETARCH'] ?? 
