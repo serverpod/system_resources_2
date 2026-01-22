@@ -11,6 +11,23 @@ const Set<String> _supported = {
   'darwin-x86_64',
 };
 
+/// Normalizes architecture names to support both Docker and standard naming conventions.
+/// Maps: amd64 -> x86_64, arm64 -> aarch64 (for Linux) or arm64 (for macOS)
+String _normalizeArchitecture(String arch, String os) {
+  // Handle Docker naming conventions
+  if (arch == 'amd64') {
+    return 'x86_64';
+  }
+  if (arch == 'arm64' && os == 'linux') {
+    return 'aarch64';
+  }
+  // Handle i386 -> i686 mapping
+  if (arch == 'i386') {
+    return 'i686';
+  }
+  return arch;
+}
+
 /// Detects the current platform architecture using Dart's Platform class.
 /// Returns the architecture string in the format expected by the library.
 String _detectArchitecture() {
@@ -23,7 +40,8 @@ String _detectArchitecture() {
                     Platform.environment['GOARCH'];
     
     if (envArch != null) {
-      return envArch.toLowerCase();
+      // Normalize environment-provided architecture
+      return _normalizeArchitecture(envArch.toLowerCase(), os);
     }
     
     // Try to detect architecture by reading /proc/cpuinfo (doesn't require external binaries)
@@ -94,13 +112,22 @@ String _detectArchitecture() {
 String _filename() {
   final os = Platform.operatingSystem.toLowerCase();
   var arch = _detectArchitecture();
+  
+  // Normalize architecture name
+  arch = _normalizeArchitecture(arch, os);
+  
   final ext = os == 'darwin' ? 'dylib' : 'so';
-
-  if (arch == 'i386') arch = 'i686';
-
   final target = os + '-' + arch;
+  
+  // Check if normalized target is supported
   if (!_supported.contains(target)) {
-    throw Exception('Unsupported platform: $target!');
+    // Try with original architecture name in case normalization changed it
+    final originalArch = _detectArchitecture();
+    final originalTarget = os + '-' + originalArch;
+    if (_supported.contains(originalTarget)) {
+      return 'libsysres-$originalTarget.$ext';
+    }
+    throw Exception('Unsupported platform: $target! Supported platforms: ${_supported.join(", ")}');
   }
 
   return 'libsysres-$target.$ext';
