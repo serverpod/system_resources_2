@@ -1,0 +1,27 @@
+# Example native_assets.yaml configuration
+# This file demonstrates how native assets would be configured for this package.
+# Native assets requires Dart SDK >=3.0.0.
+#
+# To enable native assets:
+# 1. Copy this file to native_assets.yaml
+# 2. Update pubspec.yaml SDK constraint to ">=3.0.0"
+# 3. Update lib/src/native_assets.dart with actual @Native annotations
+# 4. Migrate base.dart to use native assets instead of DynamicLibrary
+#
+# Note: The exact format may vary based on Dart SDK version and native assets implementation.
+
+assets:
+  - name: libsysres
+    path: lib/build/libsysres-{os}-{arch}.{ext}
+    os:
+      linux: libsysres-linux-{arch}.so
+      macos: libsysres-darwin-{arch}.dylib
+    arch:
+      x86_64: x86_64
+      amd64: x86_64  # Docker naming
+      aarch64: aarch64
+      arm64: aarch64  # Docker naming (Linux)
+      arm64: arm64    # macOS ARM64
+      i686: i686
+      i386: i686
+      armv7l: armv7l
