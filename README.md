@@ -5,6 +5,11 @@ Forked from [jonasroussel/system_resources](https://github.com/jonasroussel/syst
 
 Provides easy access to system resources (CPU load, memory usage).
 
+## Requirements
+
+- **Dart SDK**: 3.5.0 or higher
+- **C Compiler**: clang required at build time (install via `apt-get install clang` on Linux)
+
 ## Usage
 
 ```dart
@@ -16,6 +21,38 @@ void main() async {
   print('CPU Load Average : ${(SystemResources.cpuLoadAvg() * 100).toInt()}%');
   print('Memory Usage     : ${(SystemResources.memUsage() * 100).toInt()}%');
 }
+```
+
+### Running with Native Assets
+
+```bash
+# Run directly
+dart run example/example.dart
+
+# Run tests
+dart test
+
+# Compile to executable
+dart compile exe bin/my_app.dart
+```
+
+### Docker Example
+
+When building in Docker, ensure you have a C compiler installed:
+
+```dockerfile
+FROM dart:stable
+
+# Install C compiler for native assets
+RUN apt-get update && apt-get install -y build-essential
+
+WORKDIR /app
+COPY . .
+
+RUN dart pub get
+RUN dart --enable-experiment=native-assets compile exe bin/my_app.dart -o /app/my_app
+
+CMD ["/app/my_app"]
 ```
 
 ## Features
