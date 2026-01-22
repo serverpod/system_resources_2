@@ -8,7 +8,8 @@ Provides easy access to system resources (CPU load, memory usage).
 ## Requirements
 
 - **Dart SDK**: 3.5.0 or higher
-- **C Compiler**: clang required at build time (install via `apt-get install clang` on Linux)
+
+No C compiler is required - the package ships with pre-compiled binaries for all supported platforms.
 
 ## Usage
 
@@ -23,7 +24,7 @@ void main() async {
 }
 ```
 
-### Running with Native Assets
+### Running
 
 ```bash
 # Run directly
@@ -33,24 +34,24 @@ dart run example/example.dart
 dart test
 
 # Compile to executable
-dart compile exe bin/my_app.dart
+dart compile exe bin/my_app.dart -o my_app
+# Copy the library next to the executable
+cp lib/build/libsysres-linux-x86_64.so ./  # Linux x86_64
+# cp lib/build/libsysres-darwin-arm64.dylib ./  # macOS ARM
 ```
 
 ### Docker Example
 
-When building in Docker, ensure you have a C compiler installed:
-
 ```dockerfile
 FROM dart:stable
-
-# Install C compiler for native assets
-RUN apt-get update && apt-get install -y build-essential
 
 WORKDIR /app
 COPY . .
 
 RUN dart pub get
-RUN dart --enable-experiment=native-assets compile exe bin/my_app.dart -o /app/my_app
+RUN dart compile exe bin/my_app.dart -o /app/my_app
+# Copy library next to executable
+RUN cp lib/build/libsysres-linux-x86_64.so /app/
 
 CMD ["/app/my_app"]
 ```

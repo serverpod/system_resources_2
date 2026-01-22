@@ -38,10 +38,11 @@ doc/api/
 *.lo
 
 # Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
+# NOTE: We keep pre-compiled binaries in lib/build/ for distribution
+# *.dll
+# *.so
+# *.so.*
+# *.dylib
 
 # Executables
 *.exe
