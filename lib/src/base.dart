@@ -1,43 +1,45 @@
 import 'dart:ffi' as ffi;
-import 'package:system_resources_2/src/dylib.dart';
 
-typedef GetCpuLoad = double Function();
-typedef GetMemoryUsage = double Function();
+/// Native binding for get_cpu_load from libsysres
+@ffi.Native<ffi.Float Function()>(
+  symbol: 'get_cpu_load',
+  assetId: 'package:system_resources_2/libsysres',
+)
+external double _getCpuLoad();
 
+/// Native binding for get_memory_usage from libsysres
+@ffi.Native<ffi.Float Function()>(
+  symbol: 'get_memory_usage',
+  assetId: 'package:system_resources_2/libsysres',
+)
+external double _getMemoryUsage();
+
+/// Provides easy access to system resources (CPU load, memory usage).
+///
+/// With native assets, there's no need to call init() before using
+/// the methods. The native library is automatically linked at build time.
 class SystemResources {
-  static ffi.DynamicLibrary? _libsysres;
-
+  /// Deprecated: No longer needed with native assets.
+  /// Kept for backward compatibility - calling this is now a no-op.
+  @Deprecated('init() is no longer required with native assets')
   static Future<void> init() async {
-    _libsysres = await loadLibsysres;
+    // No-op: native assets handles library loading automatically
   }
 
-  /// Get system cpu load average
+  /// Get system CPU load average.
+  ///
+  /// Returns a value representing the normalized CPU load.
+  /// A value of 1.0 means all CPU cores are fully utilized.
+  /// Values can exceed 1.0 if the system is overloaded.
   static double cpuLoadAvg() {
-    if (_libsysres == null) {
-      throw Exception(
-        'SystemResources are not initialized, call init() before using this method.',
-      );
-    }
-
-    final fn = _libsysres!
-        .lookup<ffi.NativeFunction<ffi.Float Function()>>('get_cpu_load')
-        .asFunction<GetCpuLoad>();
-
-    return fn();
+    return _getCpuLoad();
   }
 
-  /// Get system memory currently used
+  /// Get system memory currently used.
+  ///
+  /// Returns a value between 0.0 and 1.0 representing the fraction
+  /// of memory currently in use.
   static double memUsage() {
-    if (_libsysres == null) {
-      throw Exception(
-        'SystemResources are not initialized, call init() before using this method.',
-      );
-    }
-
-    final fn = _libsysres!
-        .lookup<ffi.NativeFunction<ffi.Float Function()>>('get_memory_usage')
-        .asFunction<GetMemoryUsage>();
-
-    return fn();
+    return _getMemoryUsage();
   }
 }
