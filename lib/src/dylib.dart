@@ -133,22 +133,84 @@ String _filename() {
   return 'libsysres-$target.$ext';
 }
 
+/// Attempts to load the native library from multiple locations in order:
+/// 1. Executable directory (same directory as the running executable)
+/// 2. Package resolution path (for JIT mode)
+/// 3. LD_LIBRARY_PATH environment variable (Linux only)
 Future<DynamicLibrary> loadLibsysres = () async {
-  String objectFile;
-
-  if (Platform.script.path.endsWith('.snapshot')) {
-    objectFile = File.fromUri(Platform.script).parent.path + '/' + _filename();
-  } else {
+  final filename = _filename();
+  final triedPaths = <String>[];
+  
+  // 1. Try executable directory first (works for both AOT and JIT)
+  try {
+    final executableDir = File(Platform.resolvedExecutable).parent.path;
+    final executablePath = '$executableDir/$filename';
+    triedPaths.add(executablePath);
+    
+    if (File(executablePath).existsSync()) {
+      return DynamicLibrary.open(executablePath);
+    }
+  } catch (e) {
+    // Continue to next path if this fails
+  }
+  
+  // 2. Try package resolution path (for JIT mode, or if executable dir doesn't work)
+  try {
     final rootLibrary = 'package:system_resources_2/system_resources_2.dart';
     final build = (await Isolate.resolvePackageUri(Uri.parse(rootLibrary)))
         ?.resolve('build/');
 
-    if (build == null) {
-      throw Exception('Library could not be loaded!');
+    if (build != null) {
+      final packagePath = build.resolve(filename).toFilePath();
+      triedPaths.add(packagePath);
+      
+      if (File(packagePath).existsSync()) {
+        return DynamicLibrary.open(packagePath);
+      }
     }
-
-    objectFile = build.resolve(_filename()).toFilePath();
+  } catch (e) {
+    // Continue to next path if this fails
   }
-
-  return DynamicLibrary.open(objectFile);
+  
+  // 3. Try LD_LIBRARY_PATH (Linux only)
+  if (Platform.isLinux) {
+    final ldLibraryPath = Platform.environment['LD_LIBRARY_PATH'];
+    if (ldLibraryPath != null) {
+      final paths = ldLibraryPath.split(':');
+      for (final path in paths) {
+        if (path.isEmpty) continue;
+        final libraryPath = '$path/$filename';
+        triedPaths.add(libraryPath);
+        
+        try {
+          if (File(libraryPath).existsSync()) {
+            return DynamicLibrary.open(libraryPath);
+          }
+        } catch (e) {
+          // Continue to next path
+        }
+      }
+    }
+  }
+  
+  // 4. Legacy fallback: snapshot path (for AOT compiled executables)
+  if (Platform.script.path.endsWith('.snapshot')) {
+    final snapshotPath = File.fromUri(Platform.script).parent.path + '/' + filename;
+    triedPaths.add(snapshotPath);
+    
+    try {
+      if (File(snapshotPath).existsSync()) {
+        return DynamicLibrary.open(snapshotPath);
+      }
+    } catch (e) {
+      // Fall through to error
+    }
+  }
+  
+  // If all paths failed, throw an error with details
+  throw Exception(
+    'Library "$filename" could not be loaded!\n'
+    'Tried paths:\n${triedPaths.map((p) => '  - $p').join('\n')}\n'
+    'Please ensure the library file exists in one of these locations.'
+  );
 }();
