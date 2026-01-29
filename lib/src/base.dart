@@ -5,16 +5,36 @@ import 'dart:io';
 typedef GetCpuLoadNative = Float Function();
 typedef GetCpuLoad = double Function();
 
+/// Function type for CPU limit cores
+typedef GetCpuLimitCoresNative = Float Function();
+typedef GetCpuLimitCores = double Function();
+
 /// Function type for memory usage
 typedef GetMemoryUsageNative = Float Function();
 typedef GetMemoryUsage = double Function();
+
+/// Function type for memory limit bytes
+typedef GetMemoryLimitBytesNative = Int64 Function();
+typedef GetMemoryLimitBytes = int Function();
+
+/// Function type for memory used bytes
+typedef GetMemoryUsedBytesNative = Int64 Function();
+typedef GetMemoryUsedBytes = int Function();
+
+/// Function type for container detection
+typedef IsContainerEnvNative = Int32 Function();
+typedef IsContainerEnv = int Function();
 
 /// The loaded native library
 DynamicLibrary? _lib;
 
 /// Native function bindings
 GetCpuLoad? _getCpuLoad;
+GetCpuLimitCores? _getCpuLimitCores;
 GetMemoryUsage? _getMemoryUsage;
+GetMemoryLimitBytes? _getMemoryLimitBytes;
+GetMemoryUsedBytes? _getMemoryUsedBytes;
+IsContainerEnv? _isContainerEnv;
 
 /// Get the library filename for the current platform
 String _getLibraryPath() {
@@ -121,11 +141,32 @@ void _ensureInitialized() {
   if (_lib != null) return;
 
   _lib = _loadLibrary();
-  _getCpuLoad = _lib!.lookupFunction<GetCpuLoadNative, GetCpuLoad>('get_cpu_load');
-  _getMemoryUsage = _lib!.lookupFunction<GetMemoryUsageNative, GetMemoryUsage>('get_memory_usage');
+  _getCpuLoad =
+      _lib!.lookupFunction<GetCpuLoadNative, GetCpuLoad>('get_cpu_load');
+  _getCpuLimitCores = _lib!
+      .lookupFunction<GetCpuLimitCoresNative, GetCpuLimitCores>('get_cpu_limit_cores');
+  _getMemoryUsage = _lib!
+      .lookupFunction<GetMemoryUsageNative, GetMemoryUsage>('get_memory_usage');
+  _getMemoryLimitBytes = _lib!.lookupFunction<GetMemoryLimitBytesNative,
+      GetMemoryLimitBytes>('get_memory_limit_bytes');
+  _getMemoryUsedBytes = _lib!.lookupFunction<GetMemoryUsedBytesNative,
+      GetMemoryUsedBytes>('get_memory_used_bytes');
+  _isContainerEnv = _lib!
+      .lookupFunction<IsContainerEnvNative, IsContainerEnv>('is_container_env');
 }
 
 /// Provides easy access to system resources (CPU load, memory usage).
+///
+/// This library is **container-aware** and automatically detects container
+/// environments using cgroups v2. When running inside a container, resource
+/// usage is calculated relative to container limits rather than host resources.
+///
+/// **Requirements for container detection:**
+/// - Kubernetes 1.25+ (cgroups v2 is default)
+/// - Non-k8s environments must have cgroups v2 enabled
+///
+/// **Note:** CPU monitoring is not supported in gVisor environments.
+/// Memory monitoring works correctly in gVisor. See docs/GVISOR.md for details.
 ///
 /// The library automatically loads pre-compiled binaries from the package.
 /// No initialization is required - the library is loaded on first use.
@@ -138,22 +179,73 @@ class SystemResources {
     _ensureInitialized();
   }
 
-  /// Get system CPU load average.
+  /// Returns `true` if running in a detected container environment.
+  ///
+  /// Container detection is based on the presence of cgroups v2 memory limits.
+  /// Returns `false` on macOS (no native container support) or when running
+  /// on a host without container limits.
+  static bool isContainerEnv() {
+    _ensureInitialized();
+    return _isContainerEnv!() != 0;
+  }
+
+  /// Get CPU load average normalized by available CPU cores.
+  ///
+  /// In a container environment, this is normalized by the container's CPU
+  /// limit (from cgroups v2). On host, this is normalized by the total number
+  /// of CPU cores.
   ///
   /// Returns a value representing the normalized CPU load.
-  /// A value of 1.0 means all CPU cores are fully utilized.
+  /// A value of 1.0 means all available CPU cores are fully utilized.
   /// Values can exceed 1.0 if the system is overloaded.
+  ///
+  /// **Note:** Not supported in gVisor - always returns 0. Use external
+  /// monitoring solutions for CPU usage in gVisor environments.
   static double cpuLoadAvg() {
     _ensureInitialized();
     return _getCpuLoad!();
   }
 
-  /// Get system memory currently used.
+  /// Get the CPU limit in cores.
+  ///
+  /// In a container environment, returns the container's CPU limit.
+  /// On host, returns the total number of CPU cores.
+  ///
+  /// **Note:** In gVisor environments, returns host cores (gVisor does not
+  /// expose cgroups).
+  static double cpuLimitCores() {
+    _ensureInitialized();
+    return _getCpuLimitCores!();
+  }
+
+  /// Get memory usage as a fraction of the limit.
+  ///
+  /// In a container environment, this is calculated relative to the
+  /// container's memory limit (from cgroups v2).
+  /// On host, this is calculated relative to total system memory.
   ///
   /// Returns a value between 0.0 and 1.0 representing the fraction
   /// of memory currently in use.
   static double memUsage() {
     _ensureInitialized();
     return _getMemoryUsage!();
+  }
+
+  /// Get the memory limit in bytes.
+  ///
+  /// In a container environment, returns the container's memory limit.
+  /// On host, returns the total system memory.
+  static int memoryLimitBytes() {
+    _ensureInitialized();
+    return _getMemoryLimitBytes!();
+  }
+
+  /// Get the memory currently used in bytes.
+  ///
+  /// In a container environment, returns the container's current memory usage.
+  /// On host, returns the system's current memory usage.
+  static int memoryUsedBytes() {
+    _ensureInitialized();
+    return _getMemoryUsedBytes!();
   }
 }
