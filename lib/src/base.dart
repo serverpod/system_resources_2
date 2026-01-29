@@ -30,40 +30,25 @@ String _getLibraryPath() {
   }
 }
 
-/// Get normalized architecture name
+/// Get normalized architecture name using Abi.current()
 String _getArch() {
-  // Dart doesn't expose architecture directly, so we use a workaround
-  // Check pointer size to determine 64-bit vs 32-bit
-  final is64Bit = sizeOf<IntPtr>() == 8;
-
-  if (Platform.isMacOS) {
-    // macOS: arm64 for Apple Silicon, x86_64 for Intel
-    final envArch = Platform.environment['TARGETARCH'];
-    if (envArch == 'arm64') return 'arm64';
-    if (envArch == 'amd64') return 'x86_64';
-    return is64Bit ? 'arm64' : 'x86_64';
-  } else if (Platform.isLinux) {
-    // Check environment variable first (commonly set in Docker)
-    final envArch = Platform.environment['TARGETARCH'];
-    if (envArch == 'arm64') return 'aarch64';
-    if (envArch == 'amd64') return 'x86_64';
-
-    // Try to detect from /proc/cpuinfo
-    try {
-      final cpuinfo = File('/proc/cpuinfo').readAsStringSync();
-      if (cpuinfo.contains('aarch64') || cpuinfo.contains('ARMv8')) {
-        return 'aarch64';
-      }
-      if (cpuinfo.contains('ARMv7')) {
-        return 'armv7l';
-      }
-    } catch (_) {
-      // Ignore errors
-    }
-
-    return is64Bit ? 'x86_64' : 'i686';
+  final abi = Abi.current();
+  switch (abi) {
+    case Abi.macosArm64:
+      return 'arm64';
+    case Abi.macosX64:
+      return 'x86_64';
+    case Abi.linuxArm64:
+      return 'aarch64';
+    case Abi.linuxX64:
+      return 'x86_64';
+    case Abi.linuxIA32:
+      return 'i686';
+    case Abi.linuxArm:
+      return 'armv7l';
+    default:
+      throw UnsupportedError('Unsupported platform: $abi');
   }
-  return 'x86_64';
 }
 
 /// Try to find and load the library from various locations
