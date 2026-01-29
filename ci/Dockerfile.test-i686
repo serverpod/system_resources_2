@@ -1,0 +1,52 @@
+# Dockerfile for testing system_resources with i686 (32-bit x86) architecture
+#
+# Uses cross-compilation with gcc -m32 on an amd64 container.
+# Container-aware testing:
+# Build:  docker build --platform linux/amd64 -f ci/Dockerfile.test-i686 -t system_resources_test_i686 .
+# Run with limits: docker run --memory=256m --cpus=0.5 system_resources_test_i686
+#
+# Expected output when running with limits:
+# - Container environment: true
+# - Memory limit: ~256 MB
+# - CPU limit: ~0.5 cores
+
+FROM debian:bookworm AS builder
+
+# Install build tools, multilib support, and Dart SDK
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc-multilib \
+    curl \
+    gnupg \
+    apt-transport-https \
+    ca-certificates \
+    && sh -c 'curl https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -' \
+    && sh -c 'curl https://storage.googleapis.com/download.dartlang.org/linux/debian/dart_stable.list > /etc/apt/sources.list.d/dart_stable.list' \
+    && apt-get update \
+    && apt-get install -y dart \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy package files first for better caching
+COPY pubspec.yaml .
+
+# Get dependencies
+RUN dart pub get
+
+# Copy the rest of the source code
+COPY . .
+
+# Build the 32-bit library
+# Set TARGETARCH to i686 so Dart code detects the correct architecture
+ENV TARGETARCH=i686
+RUN mkdir -p lib/build && make CC="gcc -m32"
+
+# Verify code analyzes correctly
+RUN dart analyze
+
+# Run tests
+RUN dart test
+
+# Run example to verify it works (shows container-aware resource info)
+CMD ["dart", "run", "example/example.dart"]
