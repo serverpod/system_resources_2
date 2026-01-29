@@ -1,8 +1,3 @@
-## 2.0.0
-
-- Brings code up-to-date with latest Dart version
-- Adds test
-
 ## 1.6.0
 
 - https://github.com/jonasroussel/system_resources/pull/2
