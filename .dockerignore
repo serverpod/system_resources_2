@@ -1,0 +1,7 @@
+.git
+.dart_tool
+.packages
+pubspec.lock
+build/
+*.md
+!README.md

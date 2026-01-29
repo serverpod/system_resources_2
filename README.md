@@ -5,6 +5,12 @@ Forked from [jonasroussel/system_resources](https://github.com/jonasroussel/syst
 
 Provides easy access to system resources (CPU load, memory usage).
 
+## Requirements
+
+- **Dart SDK**: 3.5.0 or higher
+
+No C compiler is required - the package ships with pre-compiled binaries for all supported platforms.
+
 ## Usage
 
 ```dart
@@ -16,6 +22,38 @@ void main() async {
   print('CPU Load Average : ${(SystemResources.cpuLoadAvg() * 100).toInt()}%');
   print('Memory Usage     : ${(SystemResources.memUsage() * 100).toInt()}%');
 }
+```
+
+### Running
+
+```bash
+# Run directly
+dart run example/example.dart
+
+# Run tests
+dart test
+
+# Compile to executable
+dart compile exe bin/my_app.dart -o my_app
+# Copy the library next to the executable
+cp lib/build/libsysres-linux-x86_64.so ./  # Linux x86_64
+# cp lib/build/libsysres-darwin-arm64.dylib ./  # macOS ARM
+```
+
+### Docker Example
+
+```dockerfile
+FROM dart:stable
+
+WORKDIR /app
+COPY . .
+
+RUN dart pub get
+RUN dart compile exe bin/my_app.dart -o /app/my_app
+# Copy library next to executable
+RUN cp lib/build/libsysres-linux-x86_64.so /app/
+
+CMD ["/app/my_app"]
 ```
 
 ## Features
