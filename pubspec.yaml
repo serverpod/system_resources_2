@@ -1,6 +1,6 @@
 name: system_resources_2
 description: Provides easy access to system resources (CPU load, memory usage).
-version: 2.0.0
+version: 2.1.0
 repository: https://github.com/serverpod/system_resources_2
 homepage: https://github.com/serverpod/system_resources_2#readme
 
