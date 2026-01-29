@@ -1,3 +1,7 @@
+## 2.1.1
+
+- Fix package directory structure to follow Dart conventions (rename `docs/` to `doc/`)
+
 ## 2.1.0
 
 ### Container-Aware Features
