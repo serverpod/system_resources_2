@@ -1,3 +1,24 @@
+## 2.1.0
+
+### Container-Aware Features
+
+- **Container detection**: Automatically detects container environments using cgroups v2
+- **New functions**:
+  - `isContainerEnv()` - Returns true if running in a container with cgroups v2
+  - `cpuLimitCores()` - Returns CPU limit in cores (container limit or host cores)
+  - `memoryLimitBytes()` - Returns memory limit in bytes
+  - `memoryUsedBytes()` - Returns memory currently used in bytes
+- **Auto-detection**: `cpuLoadAvg()` and `memUsage()` now automatically use container limits when available
+
+### Requirements
+
+- Kubernetes 1.25+ (cgroups v2 is default)
+- Non-k8s environments must have cgroups v2 enabled
+
+### Known Limitations
+
+- **gVisor**: CPU monitoring not supported (always returns 0). Memory monitoring works correctly.
+
 ## 1.6.0
 
 - https://github.com/jonasroussel/system_resources/pull/2
