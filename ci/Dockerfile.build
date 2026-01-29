@@ -1,0 +1,31 @@
+# Dockerfile for building native libraries across platforms
+#
+# This Dockerfile is used to build the native library for different
+# Linux architectures using Docker's multi-platform support.
+#
+# Usage (local development):
+#   # Build for current platform
+#   docker build -f ci/Dockerfile.build -o lib/build .
+#
+#   # Build for specific platform (requires QEMU)
+#   docker build --platform linux/arm64 -f ci/Dockerfile.build -o lib/build .
+#
+#   # Build all Linux platforms
+#   for p in linux/amd64 linux/arm64 linux/arm/v7; do
+#     docker build --platform $p -f ci/Dockerfile.build -o lib/build .
+#   done
+
+FROM gcc:latest AS builder
+
+WORKDIR /app
+
+# Copy only files needed for the build
+COPY Makefile .
+COPY lib/src/libsysres/ lib/src/libsysres/
+
+# Create output directory and build
+RUN mkdir -p lib/build && make
+
+# Output stage - extracts just the built library
+FROM scratch AS output
+COPY --from=builder /app/lib/build/libsysres-*.so /

@@ -1,7 +1,7 @@
 # Dockerfile for testing system_resources with container-aware features
 #
 # Container-aware testing:
-# Build:  docker build -t system_resources_test .
+# Build:  docker build -f ci/Dockerfile.test -t system_resources_test .
 # Run with limits: docker run --memory=256m --cpus=0.5 system_resources_test
 #
 # Expected output when running with limits:
