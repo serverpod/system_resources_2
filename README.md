@@ -1,4 +1,6 @@
 # System Resources
+Forked from [jonasroussel/system_resources](https://github.com/jonasroussel/system_resources). Brings the package up-to-date with latest Dart version.
+
 [![pub package](https://img.shields.io/pub/v/system_resources.svg)](https://pub.dev/packages/system_resources)
 
 Provides easy access to system resources (CPU load, memory usage).
@@ -8,7 +10,9 @@ Provides easy access to system resources (CPU load, memory usage).
 ```dart
 import 'package:system_resources/system_resources.dart';
 
-void main() {
+void main() async {
+  await SystemResources.init();
+
   print('CPU Load Average : ${(SystemResources.cpuLoadAvg() * 100).toInt()}%');
   print('Memory Usage     : ${(SystemResources.memUsage() * 100).toInt()}%');
 }
