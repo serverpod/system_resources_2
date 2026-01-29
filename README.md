@@ -1,7 +1,7 @@
 # System Resources
 Forked from [jonasroussel/system_resources](https://github.com/jonasroussel/system_resources). Brings the package up-to-date with latest Dart version.
 
-[![pub package](https://img.shields.io/pub/v/system_resources.svg)](https://pub.dev/packages/system_resources)
+[![pub package](https://img.shields.io/pub/v/system_resources_2.svg)](https://pub.dev/packages/system_resources_2)
 
 Provides easy access to system resources (CPU load, memory usage).
 
@@ -154,4 +154,4 @@ memUsage   | 🔴     | 🔴     | 🔴    | 🔴     |
 You are free to improve, compile and test `libsysres` C code for any platform not fully supported.
 
 Github
-[Issues](https://github.com/jonasroussel/system_resources/issues) | [Pull requests](https://github.com/jonasroussel/system_resources/pulls)
+[Issues](https://github.com/serverpod/system_resources_2/issues) | [Pull requests](https://github.com/serverpod/system_resources_2/pulls)
