@@ -91,3 +91,84 @@ clean:
 .PHONY: fclean
 fclean: clean
 	-$(RM) $(TARGET_LIB) lib/build/libsysres-*-static.*
+
+# =============================================================================
+# Docker-based builds for cross-platform Linux binaries
+# These targets use the same Dockerfile.build used by CI for reproducibility
+# Note: i686 uses native cross-compilation (gcc -m32) since gcc image doesn't support linux/386
+# =============================================================================
+
+DOCKER_PLATFORMS := linux/amd64 linux/arm64 linux/arm/v7
+
+.PHONY: docker-build
+docker-build:
+	@echo "Building native library for current platform using Docker..."
+	docker build -f ci/Dockerfile.build --output type=local,dest=lib/build .
+
+.PHONY: docker-build-all
+docker-build-all:
+	@echo "Building native libraries for all Linux platforms..."
+	@for platform in $(DOCKER_PLATFORMS); do \
+		echo "Building for $$platform..."; \
+		docker build --platform $$platform -f ci/Dockerfile.build --output type=local,dest=lib/build . || exit 1; \
+	done
+	@echo "Building for i686 (cross-compilation, cached)..."
+	docker build --platform linux/amd64 -f ci/Dockerfile.build-i686 --output type=local,dest=lib/build .
+	@echo "All Linux binaries built successfully!"
+	@ls -la lib/build/libsysres-linux-*.so
+
+.PHONY: docker-build-amd64
+docker-build-amd64:
+	docker build --platform linux/amd64 -f ci/Dockerfile.build --output type=local,dest=lib/build .
+
+.PHONY: docker-build-arm64
+docker-build-arm64:
+	docker build --platform linux/arm64 -f ci/Dockerfile.build --output type=local,dest=lib/build .
+
+.PHONY: docker-build-armv7
+docker-build-armv7:
+	docker build --platform linux/arm/v7 -f ci/Dockerfile.build --output type=local,dest=lib/build .
+
+# i686 uses cross-compilation since gcc Docker image doesn't support linux/386
+# Uses a dedicated Dockerfile with cached gcc-multilib layer
+.PHONY: docker-build-i686
+docker-build-i686:
+	@echo "Building i686 using cross-compilation (cached)..."
+	docker build --platform linux/amd64 -f ci/Dockerfile.build-i686 --output type=local,dest=lib/build .
+
+# =============================================================================
+# Convenience targets for building all binaries
+# =============================================================================
+
+# Build all Linux binaries (requires Docker)
+# Outputs: libsysres-linux-{x86_64,aarch64,armv7l,i686}.so
+.PHONY: build-all-linux
+build-all-linux: docker-build-all
+	@echo "All Linux binaries are ready in lib/build/"
+
+# Build all macOS binaries (requires running on macOS with Xcode)
+# Outputs: libsysres-darwin-{arm64,x86_64}.dylib
+.PHONY: build-all-macos
+build-all-macos:
+	@if [ "$$(uname)" != "Darwin" ]; then \
+		echo "Error: macOS builds require running on macOS"; \
+		exit 1; \
+	fi
+	@echo "Building macOS x86_64..."
+	@$(MAKE) clean
+	@arch -x86_64 $(MAKE)
+	@echo "Building macOS ARM64..."
+	@$(MAKE) clean
+	@arch -arm64 $(MAKE)
+	@echo "All macOS binaries built successfully!"
+	@ls -la lib/build/libsysres-darwin-*.dylib
+
+# Build everything (Linux via Docker, macOS if on macOS)
+.PHONY: build-all
+build-all: build-all-linux
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		echo "Detected macOS, also building macOS binaries..."; \
+		$(MAKE) build-all-macos; \
+	fi
+	@echo "All binaries built!"
+	@ls -la lib/build/libsysres-*

@@ -1,0 +1,25 @@
+# Dockerfile for building i686 (32-bit x86) Linux binary
+#
+# Uses cross-compilation with gcc -m32 on an amd64 container.
+# The build-essential and gcc-multilib layers are cached after the first build.
+#
+# Usage:
+#   docker build --platform linux/amd64 -f ci/Dockerfile.build-i686 --output type=local,dest=lib/build .
+
+FROM debian:bookworm AS builder
+
+# Install build tools and multilib support (cached after first build)
+RUN apt-get update && apt-get install -y build-essential gcc-multilib && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy only files needed for the build
+COPY Makefile .
+COPY lib/src/libsysres/ lib/src/libsysres/
+
+# Build the 32-bit library
+RUN mkdir -p lib/build && make CC="gcc -m32"
+
+# Output stage - extracts just the built library
+FROM scratch AS output
+COPY --from=builder /app/lib/build/libsysres-linux-i686.so /
