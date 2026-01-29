@@ -1,3 +1,4 @@
+---
 name: Build Binaries
 
 on:
@@ -25,7 +26,7 @@ jobs:
           CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
           echo "Changed files:"
           echo "$CHANGED_FILES"
-          
+
           # Check if any C source files changed
           if echo "$CHANGED_FILES" | grep -qE '^lib/src/libsysres/.*\.(c|h)$'; then
             echo "Native source files changed - rebuild required"
@@ -205,16 +206,16 @@ jobs:
           script: |
             const checksums = `${{ steps.checksums.outputs.checksums }}`;
             const body = `## Native Binaries Rebuilt
-            
+
             The native binaries have been automatically rebuilt from source.
-            
+
             ### MD5 Checksums
             \`\`\`
             ${checksums}
             \`\`\`
-            
+
             These checksums can be used to verify the provenance of the binaries.`;
-            
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
