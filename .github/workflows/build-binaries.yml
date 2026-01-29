@@ -19,7 +19,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check for source file changes
+      - name: Check for source or binary changes
         id: check
         run: |
           # Get the list of changed files between base and head
@@ -31,8 +31,12 @@ jobs:
           if echo "$CHANGED_FILES" | grep -qE '^lib/src/libsysres/.*\.(c|h)$'; then
             echo "Native source files changed - rebuild required"
             echo "changed=true" >> $GITHUB_OUTPUT
+          # Check if any binary files changed (e.g., accidental local build commit)
+          elif echo "$CHANGED_FILES" | grep -qE '^lib/build/libsysres-'; then
+            echo "Binary files changed - rebuild to ensure CI-built provenance"
+            echo "changed=true" >> $GITHUB_OUTPUT
           else
-            echo "No native source file changes detected"
+            echo "No native source or binary changes detected"
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
