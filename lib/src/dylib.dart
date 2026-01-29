@@ -120,13 +120,13 @@ String _filename() {
   arch = _normalizeArchitecture(arch, os);
   
   final ext = os == 'darwin' ? 'dylib' : 'so';
-  final target = os + '-' + arch;
+  final target = '$os-$arch';
   
   // Check if normalized target is supported
   if (!_supported.contains(target)) {
     // Try with original architecture name in case normalization changed it
     final originalArch = _detectArchitecture();
-    final originalTarget = os + '-' + originalArch;
+    final originalTarget = '$os-$originalArch';
     if (_supported.contains(originalTarget)) {
       return 'libsysres-$originalTarget.$ext';
     }
@@ -198,7 +198,7 @@ Future<DynamicLibrary> loadLibsysres = () async {
   
   // 4. Legacy fallback: snapshot path (for AOT compiled executables)
   if (Platform.script.path.endsWith('.snapshot')) {
-    final snapshotPath = File.fromUri(Platform.script).parent.path + '/' + filename;
+    final snapshotPath = '${File.fromUri(Platform.script).parent.path}/$filename';
     triedPaths.add(snapshotPath);
     
     try {
