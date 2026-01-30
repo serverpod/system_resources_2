@@ -51,7 +51,104 @@ String _getLibraryPath() {
 }
 
 /// Get normalized architecture name using Abi.current()
+/// Checks environment variables first (for cross-compilation scenarios)
+/// Also checks available library files as a fallback
 String _getArch() {
+  // Check environment variables first (GCC-compatible: ARCH, GOARCH)
+  // This allows overriding the ABI-based detection for cross-compilation scenarios
+  if (Platform.isLinux) {
+    final envArch = Platform.environment['ARCH'] ?? 
+                    Platform.environment['GOARCH'];
+    
+    if (envArch != null) {
+      final normalized = envArch.toLowerCase();
+      // Map common environment variable values to our architecture names
+      if (normalized == 'amd64' || normalized == 'x86_64') {
+        return 'x86_64';
+      }
+      if (normalized == 'arm64' || normalized == 'aarch64') {
+        return 'aarch64';
+      }
+      if (normalized == 'arm' || normalized == 'armv7' || normalized == 'armv7l') {
+        return 'armv7l';
+      }
+      if (normalized == 'i386' || normalized == 'i686' || normalized == '386') {
+        return 'i686';
+      }
+      // If it's already in our format, return as-is
+      if (normalized == 'x86_64' || normalized == 'aarch64' || normalized == 'armv7l' || normalized == 'i686') {
+        return normalized;
+      }
+    }
+    
+    // Check what library files exist in lib/build/ as a fallback
+    // This helps when cross-compiling (e.g., i686 on x86_64 host)
+    // Check executable directory and relative paths (same approach as _loadLibrary)
+    try {
+      final possibleDirs = <Directory>[];
+      
+      // Check executable directory
+      try {
+        final executableDir = File(Platform.resolvedExecutable).parent;
+        possibleDirs.add(Directory('${executableDir.path}/lib/build'));
+      } catch (_) {
+        // Ignore if executable path not available
+      }
+      
+      // Check script directory
+      final scriptUri = Platform.script;
+      if (scriptUri.scheme == 'file') {
+        try {
+          final scriptDir = File(scriptUri.toFilePath()).parent;
+          possibleDirs.add(Directory('${scriptDir.path}/lib/build'));
+        } catch (_) {
+          // Ignore if script path not available
+        }
+      }
+      
+      // Also check relative paths from current working directory
+      possibleDirs.addAll([
+        Directory('lib/build'),
+        Directory('../lib/build'),
+        Directory('../../lib/build'),
+      ]);
+      
+      for (final libBuildDir in possibleDirs) {
+        if (libBuildDir.existsSync()) {
+          final libFiles = libBuildDir.listSync()
+              .whereType<File>()
+              .where((f) => f.path.contains('libsysres-linux-') && f.path.endsWith('.so'))
+              .map((f) => f.path)
+              .toList();
+          
+          // If only one library exists, use that architecture
+          if (libFiles.length == 1) {
+            final match = RegExp(r'libsysres-linux-([^.]+)\.so').firstMatch(libFiles.first);
+            if (match != null) {
+              return match.group(1)!;
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Ignore errors and fall through to ABI detection
+    }
+  } else if (Platform.isMacOS) {
+    final envArch = Platform.environment['ARCH'] ?? 
+                    Platform.environment['GOARCH'];
+    
+    if (envArch != null) {
+      final normalized = envArch.toLowerCase();
+      if (normalized == 'arm64' || normalized == 'aarch64') {
+        return 'arm64';
+      }
+      if (normalized == 'amd64' || normalized == 'x86_64') {
+        return 'x86_64';
+      }
+    }
+  }
+  
+  // Fallback to ABI-based detection
   final abi = Abi.current();
   switch (abi) {
     case Abi.macosArm64:

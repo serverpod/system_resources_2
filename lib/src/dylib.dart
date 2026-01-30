@@ -37,9 +37,8 @@ String _detectArchitecture() {
   final os = Platform.operatingSystem.toLowerCase();
   
   if (os == 'linux') {
-    // Check environment variables first (commonly set in Docker/build environments)
-    final envArch = Platform.environment['TARGETARCH'] ?? 
-                    Platform.environment['ARCH'] ?? 
+    // Check environment variables first (GCC-compatible: ARCH, GOARCH)
+    final envArch = Platform.environment['ARCH'] ?? 
                     Platform.environment['GOARCH'];
     
     if (envArch != null) {
@@ -75,7 +74,7 @@ String _detectArchitecture() {
     // Fallback: use pointer size for basic detection
     if (_is64Bit) {
       // Default to x86_64 for 64-bit Linux if no other info available
-      // Users can override with TARGETARCH environment variable
+      // Users can override with ARCH environment variable
       return 'x86_64';
     } else {
       return 'i686';
@@ -84,9 +83,8 @@ String _detectArchitecture() {
     // macOS uses different architecture naming
     if (_is64Bit) {
       // Check environment variables that might indicate architecture
-      // These are commonly set in Docker/build environments
-      final envArch = Platform.environment['TARGETARCH'] ?? 
-                      Platform.environment['ARCH'] ??
+      // GCC-compatible: ARCH, GOARCH
+      final envArch = Platform.environment['ARCH'] ??
                       Platform.environment['GOARCH'];
       
       if (envArch != null) {
@@ -102,8 +100,7 @@ String _detectArchitecture() {
       // Note: Platform class doesn't directly expose CPU architecture on macOS
       // Without external binaries (uname/sysctl), we cannot reliably detect ARM vs x86_64
       // Default to x86_64 for backward compatibility
-      // Users should set TARGETARCH environment variable for Apple Silicon (ARM64) systems
-      // This is acceptable since Docker/build environments typically set TARGETARCH anyway
+      // Users should set ARCH environment variable for Apple Silicon (ARM64) systems
       return 'x86_64';
     }
     return 'x86_64';

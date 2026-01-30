@@ -1,0 +1,67 @@
+# Dockerfile for testing system_resources with i686 (32-bit x86) architecture
+#
+# Uses cross-compilation with gcc -m32 on an amd64 container.
+# Container-aware testing:
+# Build:  docker build --platform linux/amd64 -f ci/Dockerfile.test-i686 -t system_resources_test_i686 .
+# Run with limits: docker run --memory=256m --cpus=0.5 system_resources_test_i686
+#
+# Expected output when running with limits:
+# - Container environment: true
+# - Memory limit: ~256 MB
+# - CPU limit: ~0.5 cores
+
+FROM debian:bookworm AS builder
+
+# Install build tools, multilib support, and Dart SDK
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc-multilib \
+    curl \
+    gnupg \
+    apt-transport-https \
+    ca-certificates \
+    && sh -c 'curl https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -' \
+    && sh -c 'curl https://storage.googleapis.com/download.dartlang.org/linux/debian/dart_stable.list > /etc/apt/sources.list.d/dart_stable.list' \
+    && apt-get update \
+    && apt-get install -y dart \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy package files first for better caching
+COPY pubspec.yaml .
+
+# Get dependencies
+RUN dart pub get
+
+# Copy the rest of the source code
+COPY . .
+
+# Build the 32-bit library
+# With gcc -m32, Makefile detects i686 via __i386__ macro
+# Set ARCH for Dart runtime to load i686 library instead of x86_64
+# (ARCH is a GCC-compatible environment variable)
+ENV ARCH=i686
+RUN mkdir -p lib/build && make CC="gcc -m32"
+
+# Verify code analyzes correctly
+RUN dart analyze
+
+# Verify library was built correctly
+RUN ls -la lib/build/ && echo "Library files:" && find lib/build -name "*.so" -type f
+
+# Verify the i686 library exists and is a valid 32-bit ELF
+# Check ELF header: bytes 5 should be 0x01 for 32-bit (0x02 for 64-bit)
+RUN test -f lib/build/libsysres-linux-i686.so && \
+    head -c 5 lib/build/libsysres-linux-i686.so | tail -c 1 | od -An -tx1 | grep -q "01" && \
+    echo "SUCCESS: i686 library is a valid 32-bit ELF binary"
+
+# NOTE: Cannot run Dart tests with i686 library because:
+# - The Dart SDK only provides 64-bit binaries
+# - A 64-bit Dart runtime cannot load a 32-bit shared library
+# - The i686 library is for native 32-bit Linux applications, not Dart VM
+#
+# The library build is verified above. For functional testing, 
+# use the x86_64 or other 64-bit architecture tests.
+
+CMD ["echo", "i686 library build verification complete"]
