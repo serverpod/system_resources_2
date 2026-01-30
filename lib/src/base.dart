@@ -172,6 +172,7 @@ String _getArch() {
 DynamicLibrary _loadLibrary() {
   final libName = _getLibraryPath();
   final locations = <String>[];
+  final errors = <String>[];
 
   // Get the script/executable directory
   final scriptUri = Platform.script;
@@ -194,30 +195,14 @@ DynamicLibrary _loadLibrary() {
     locations.add('$pubCachePath/hosted/pub.dev/system_resources_2/lib/build/$libName');
   }
 
-  // Try each location
+  // Try each location by attempting to load directly.
+  // We avoid using File.existsSync() because it returns false in minimal
+  // container environments (e.g., distroless) even when the file exists.
   for (final path in locations) {
     try {
-      // Handle glob patterns
-      if (path.contains('*')) {
-        final dir = Directory(path.substring(0, path.lastIndexOf('*')).replaceAll('*', ''));
-        if (dir.existsSync()) {
-          for (final entity in dir.parent.listSync()) {
-            if (entity is Directory && entity.path.contains('system_resources_2')) {
-              final libPath = '${entity.path}/lib/build/$libName';
-              if (File(libPath).existsSync()) {
-                return DynamicLibrary.open(libPath);
-              }
-            }
-          }
-        }
-        continue;
-      }
-
-      if (File(path).existsSync()) {
-        return DynamicLibrary.open(path);
-      }
-    } catch (_) {
-      // Try next location
+      return DynamicLibrary.open(path);
+    } catch (e) {
+      errors.add('$path: $e');
     }
   }
 
@@ -225,10 +210,11 @@ DynamicLibrary _loadLibrary() {
   try {
     return DynamicLibrary.open(libName);
   } catch (e) {
+    errors.add('system path ($libName): $e');
     throw StateError(
-      'Could not find $libName. '
+      'Could not load $libName. '
       'Searched in: ${locations.join(", ")}. '
-      'Make sure the library is in one of these locations.',
+      'Errors:\n${errors.join("\n")}',
     );
   }
 }
