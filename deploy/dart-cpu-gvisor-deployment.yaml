@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dart-cpu-gvisor
+  namespace: prometheus-test
+  labels:
+    app: dart-cpu-gvisor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dart-cpu-gvisor
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  template:
+    metadata:
+      labels:
+        app: dart-cpu-gvisor
+    spec:
+      runtimeClassName: gvisor
+      automountServiceAccountToken: false
+      containers:
+      - name: dart-cpu-gvisor
+        image: europe-docker.pkg.dev/tenant-dev-435411/tenant-container-repo/dart-cpu-gvisor:latest
+        imagePullPolicy: Always
+        env:
+        - name: CPU_LIMIT_MILLICORES
+          value: "250"
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+            ephemeral-storage: 1Gi
+          limits:
+            cpu: "250m"
+            memory: 256Mi
+            ephemeral-storage: 1Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      tolerations:
+      - key: kubernetes.io/arch
+        operator: Equal
+        value: amd64
+        effect: NoSchedule
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
