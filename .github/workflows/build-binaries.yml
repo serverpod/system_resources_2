@@ -31,6 +31,14 @@ jobs:
           if echo "$CHANGED_FILES" | grep -qE '^lib/src/libsysres/.*\.(c|h)$'; then
             echo "Native source files changed - rebuild required"
             echo "changed=true" >> $GITHUB_OUTPUT
+          # Check if any build Dockerfiles changed
+          elif echo "$CHANGED_FILES" | grep -qE '^ci/Dockerfile\.build'; then
+            echo "Build Dockerfiles changed - rebuild required"
+            echo "changed=true" >> $GITHUB_OUTPUT
+          # Check if Makefile changed
+          elif echo "$CHANGED_FILES" | grep -qE '^Makefile$'; then
+            echo "Makefile changed - rebuild required"
+            echo "changed=true" >> $GITHUB_OUTPUT
           # Check if any binary files changed (e.g., accidental local build commit)
           elif echo "$CHANGED_FILES" | grep -qE '^lib/build/libsysres-'; then
             echo "Binary files changed - rebuild to ensure CI-built provenance"
@@ -226,3 +234,29 @@ jobs:
               issue_number: context.issue.number,
               body: body
             });
+
+  # Test compatibility across dart versions after binaries are rebuilt
+  test-compat:
+    name: test-compat (dart:${{ matrix.dart }})
+    needs: commit-binaries
+    if: needs.check-source-changed.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dart: ["3.8", "3.9", "3.10", "stable"]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build and test on dart:${{ matrix.dart }}
+        run: |
+          docker build \
+            --build-arg DART_VERSION=${{ matrix.dart }} \
+            -f ci/Dockerfile.test-compat \
+            -t test-compat-${{ matrix.dart }} \
+            .
+          docker run --rm test-compat-${{ matrix.dart }}

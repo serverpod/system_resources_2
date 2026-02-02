@@ -1,6 +1,10 @@
 import 'dart:ffi';
 import 'dart:io';
 
+/// Min glibc version (GLIBC_2.7 symbol requirement)
+const _minGlibcMajor = 2;
+const _minGlibcMinor = 7;
+
 /// Function type for CPU load
 typedef GetCpuLoadNative = Float Function();
 typedef GetCpuLoad = double Function();
@@ -168,11 +172,65 @@ String _getArch() {
   }
 }
 
+/// Detect glibc version on Linux. Returns (major, minor) or null.
+(int, int)? _getGlibcVersion() {
+  if (!Platform.isLinux) return null;
+  try {
+    for (final path in ['/lib64/libc.so.6', '/lib/libc.so.6']) {
+      if (File(path).existsSync()) {
+        final result = Process.runSync(path, []);
+        final output = '${result.stdout}${result.stderr}';
+        final m = RegExp(r'GLIBC[_ ](\d+)\.(\d+)|version (\d+)\.(\d+)').firstMatch(output);
+        if (m != null) {
+          final major = int.tryParse(m.group(1) ?? m.group(3) ?? '');
+          final minor = int.tryParse(m.group(2) ?? m.group(4) ?? '');
+          if (major != null && minor != null) return (major, minor);
+        }
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+/// Check glibc compatibility. Returns error message if incompatible.
+String? _checkGlibcCompatibility() {
+  final version = _getGlibcVersion();
+  if (version == null) return null;
+  final (major, minor) = version;
+  if (major < _minGlibcMajor || (major == _minGlibcMajor && minor < _minGlibcMinor)) {
+    return 'glibc $major.$minor < required $_minGlibcMajor.$_minGlibcMinor';
+  }
+  return null;
+}
+
+/// Analyze load error and return concise diagnostic message.
+String _analyzeLoadError(String error, String libName) {
+  if (error.contains('GLIBC_') && error.contains('not found')) {
+    final v = RegExp(r"GLIBC_(\d+\.\d+)").firstMatch(error)?.group(1) ?? '?';
+    final sys = _getGlibcVersion();
+    final sysStr = sys != null ? ' (have ${sys.$1}.${sys.$2})' : '';
+    return '\n\nRequires glibc $v$sysStr. Use Ubuntu 14.04+, Debian 8+, or CentOS 7+.';
+  }
+  if (error.contains('cannot open shared object') || error.contains('No such file')) {
+    return '\n\nLibrary not found. Place next to executable or in lib/build/.';
+  }
+  if (error.contains('wrong ELF class') || error.contains('Exec format error')) {
+    return '\n\nArchitecture mismatch. Expected: ${_getArch()}.';
+  }
+  return '';
+}
+
 /// Try to find and load the library from various locations
 DynamicLibrary _loadLibrary() {
   final libName = _getLibraryPath();
   final locations = <String>[];
   final errors = <String>[];
+
+  // Warn early if glibc is too old
+  if (Platform.isLinux) {
+    final compatError = _checkGlibcCompatibility();
+    if (compatError != null) stderr.writeln('[system_resources_2] $compatError');
+  }
 
   // Get the script/executable directory
   final scriptUri = Platform.script;
@@ -211,10 +269,16 @@ DynamicLibrary _loadLibrary() {
     return DynamicLibrary.open(libName);
   } catch (e) {
     errors.add('system path ($libName): $e');
+
+    // Analyze errors to provide helpful diagnostics
+    final allErrors = errors.join('\n');
+    final diagnostics = _analyzeLoadError(allErrors, libName);
+
     throw StateError(
-      'Could not load $libName. '
-      'Searched in: ${locations.join(", ")}. '
-      'Errors:\n${errors.join("\n")}',
+      'Could not load native library: $libName\n\n'
+      'Searched locations:\n${locations.map((l) => '  - $l').join('\n')}\n\n'
+      'Errors:\n${errors.map((e) => '  $e').join('\n')}'
+      '$diagnostics',
     );
   }
 }

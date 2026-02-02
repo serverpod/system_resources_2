@@ -10,6 +10,8 @@ Provides easy access to system resources (CPU load, memory usage).
 ## Requirements
 
 - **Dart SDK**: 3.5.0 or higher
+- **Linux**: glibc 2.7 or higher (Ubuntu 14.04+, Debian 8+, CentOS 7+, RHEL 7+)
+- **macOS**: 10.15 (Catalina) or higher
 - **Container detection**: Requires cgroups v2 (Kubernetes 1.25+ or Linux with cgroups v2 enabled)
 
 No C compiler is required - the package ships with pre-compiled binaries for all supported platforms.
