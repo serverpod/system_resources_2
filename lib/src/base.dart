@@ -196,8 +196,8 @@ DynamicLibrary _loadLibrary() {
   }
 
   // Try each location by attempting to load directly.
-  // We avoid using File.existsSync() because it returns false in minimal
-  // container environments (e.g., distroless) even when the file exists.
+  // Using DynamicLibrary.open() directly is preferred over File.existsSync()
+  // because it's a single operation and avoids potential TOCTOU race conditions.
   for (final path in locations) {
     try {
       return DynamicLibrary.open(path);
