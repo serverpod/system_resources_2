@@ -1,4 +1,6 @@
-# Dockerfile for testing system_resources with container-aware features
+# Dockerfile for testing system_resources with compiled executable
+#
+# Linux uses pure Dart implementation - no native library build needed!
 #
 # Container-aware testing:
 # Build:  docker build -f ci/Dockerfile.test -t system_resources_test .
@@ -7,26 +9,18 @@
 # Expected output when running with limits:
 # - Container environment: true
 # - Memory limit: ~256 MB
-# - CPU limit: ~0.5 cores
+# - CPU limit: ~0.5 cores (from cgroups)
 
-FROM dart:stable
-
-# Install build tools for compiling native library
-RUN apt-get update && apt-get install -y build-essential && rm -rf /var/lib/apt/lists/*
+FROM dart:stable AS build
 
 WORKDIR /app
 
 # Copy package files first for better caching
 COPY pubspec.yaml .
-
-# Get dependencies
 RUN dart pub get
 
 # Copy the rest of the source code
 COPY . .
-
-# Build native library with new container-aware functions
-RUN make
 
 # Verify code analyzes correctly
 RUN dart analyze
@@ -34,5 +28,15 @@ RUN dart analyze
 # Run tests
 RUN dart test
 
-# Run example to verify it works (shows container-aware resource info)
-CMD ["dart", "run", "example/example.dart"]
+# Compile to native executable
+RUN dart compile exe example/example.dart -o /app/example_app
+
+# Minimal runtime image
+FROM debian:bookworm-slim
+
+WORKDIR /app
+COPY --from=build /app/example_app /app/example_app
+
+# No native library copy needed - Linux uses pure Dart!
+
+CMD ["/app/example_app"]

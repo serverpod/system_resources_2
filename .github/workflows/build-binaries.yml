@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: [main, master]
 
+# This workflow only builds macOS binaries.
+# Linux uses pure Dart implementation (no native libraries needed).
+
 jobs:
   check-source-changed:
     name: Check if native source changed
@@ -40,8 +43,8 @@ jobs:
             echo "Makefile changed - rebuild required"
             echo "changed=true" >> $GITHUB_OUTPUT
           # Check if any binary files changed (e.g., accidental local build commit)
-          elif echo "$CHANGED_FILES" | grep -qE '^lib/build/libsysres-'; then
-            echo "Binary files changed - rebuild to ensure CI-built provenance"
+          elif echo "$CHANGED_FILES" | grep -qE '^lib/build/libsysres-darwin'; then
+            echo "macOS binary files changed - rebuild to ensure CI-built provenance"
             echo "changed=true" >> $GITHUB_OUTPUT
           else
             echo "No native source or binary changes detected"
@@ -86,80 +89,6 @@ jobs:
           path: lib/build/libsysres-darwin-x86_64.dylib
           retention-days: 1
 
-  # Build for all Linux architectures using Docker + matrix
-  # This uses the same ci/Dockerfile.build that developers can use locally
-  build-linux:
-    name: Build ${{ matrix.artifact }}
-    needs: check-source-changed
-    if: needs.check-source-changed.outputs.changed == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - platform: linux/amd64
-            artifact: libsysres-linux-x86_64.so
-            qemu: ""
-          - platform: linux/arm64
-            artifact: libsysres-linux-aarch64.so
-            qemu: arm64
-          - platform: linux/arm/v7
-            artifact: libsysres-linux-armv7l.so
-            qemu: arm
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up QEMU
-        if: matrix.qemu != ''
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
-        with:
-          platforms: ${{ matrix.qemu }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Build with Docker
-        run: |
-          docker build \
-            --platform ${{ matrix.platform }} \
-            -f ci/Dockerfile.build \
-            --output type=local,dest=lib/build \
-            .
-
-      - name: Upload binary
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: ${{ matrix.artifact }}
-          path: lib/build/${{ matrix.artifact }}
-          retention-days: 1
-
-  # Build for Linux i686 (32-bit x86) using Docker cross-compilation
-  # Uses ci/Dockerfile.build-i686 with cached gcc-multilib layer
-  build-linux-i686:
-    name: Build libsysres-linux-i686.so
-    needs: check-source-changed
-    if: needs.check-source-changed.outputs.changed == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Build with Docker
-        run: |
-          docker build \
-            --platform linux/amd64 \
-            -f ci/Dockerfile.build-i686 \
-            --output type=local,dest=lib/build \
-            .
-
-      - name: Upload binary
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: libsysres-linux-i686.so
-          path: lib/build/libsysres-linux-i686.so
-          retention-days: 1
-
   # Commit rebuilt binaries and post checksums
   commit-binaries:
     name: Commit binaries and post checksums
@@ -167,8 +96,6 @@ jobs:
       - check-source-changed
       - build-darwin-arm64
       - build-darwin-x86_64
-      - build-linux
-      - build-linux-i686
     if: needs.check-source-changed.outputs.changed == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -187,20 +114,16 @@ jobs:
 
       - name: Copy binaries to lib/build
         run: |
-          # Copy macOS binaries
+          mkdir -p lib/build
+          # Copy macOS binaries only (Linux uses pure Dart)
           cp artifacts/libsysres-darwin-arm64/libsysres-darwin-arm64.dylib lib/build/
           cp artifacts/libsysres-darwin-x86_64/libsysres-darwin-x86_64.dylib lib/build/
-          # Copy Linux binaries (artifact names match the file names)
-          cp artifacts/libsysres-linux-x86_64.so/libsysres-linux-x86_64.so lib/build/
-          cp artifacts/libsysres-linux-i686.so/libsysres-linux-i686.so lib/build/
-          cp artifacts/libsysres-linux-aarch64.so/libsysres-linux-aarch64.so lib/build/
-          cp artifacts/libsysres-linux-armv7l.so/libsysres-linux-armv7l.so lib/build/
 
       - name: Compute checksums
         id: checksums
         run: |
           cd lib/build
-          md5sum libsysres-* | sort > checksums.md5
+          md5sum libsysres-darwin-* | sort > checksums.md5
           cat checksums.md5
           echo "checksums<<EOF" >> $GITHUB_OUTPUT
           cat checksums.md5 >> $GITHUB_OUTPUT
@@ -209,17 +132,18 @@ jobs:
       - name: Commit binaries
         uses: stefanzweifel/git-auto-commit-action@04702edda442b2e678b25b537cec683a1493fcb9 # v7.1.0
         with:
-          commit_message: "chore: rebuild native binaries"
-          file_pattern: "lib/build/*.dylib lib/build/*.so lib/build/checksums.md5"
+          commit_message: "chore: rebuild macOS native binaries"
+          file_pattern: "lib/build/*.dylib lib/build/checksums.md5"
 
       - name: Post PR comment with checksums
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const checksums = `${{ steps.checksums.outputs.checksums }}`;
-            const body = `## Native Binaries Rebuilt
+            const body = `## macOS Binaries Rebuilt
 
-            The native binaries have been automatically rebuilt from source.
+            The macOS native binaries have been automatically rebuilt from source.
+            Linux uses pure Dart implementation (no native binaries needed).
 
             ### MD5 Checksums
             \`\`\`
@@ -234,29 +158,3 @@ jobs:
               issue_number: context.issue.number,
               body: body
             });
-
-  # Test compatibility across dart versions after binaries are rebuilt
-  test-compat:
-    name: test-compat (dart:${{ matrix.dart }})
-    needs: commit-binaries
-    if: needs.check-source-changed.outputs.changed == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        dart: ["3.8", "3.9", "3.10", "stable"]
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.head_ref }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Build and test on dart:${{ matrix.dart }}
-        run: |
-          docker build \
-            --build-arg DART_VERSION=${{ matrix.dart }} \
-            -f ci/Dockerfile.test-compat \
-            -t test-compat-${{ matrix.dart }} \
-            .
-          docker run --rm test-compat-${{ matrix.dart }}

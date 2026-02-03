@@ -7,14 +7,20 @@ Provides easy access to system resources (CPU load, memory usage).
 
 **Container-aware**: Automatically detects container environments and returns resource usage relative to container limits instead of host resources.
 
+## Key Features
+
+- **Hybrid implementation**: Pure Dart on Linux, FFI on macOS
+- **gVisor compatible**: Works in gVisor environments (uses cgroup accounting, not getloadavg)
+- **Cgroup v1/v2 support**: Automatically detects and uses appropriate paths
+- **No native dependencies on Linux**: Pure Dart file I/O, no glibc requirements
+- **Serverpod compatible**: Drop-in replacement for system_resources package
+
 ## Requirements
 
 - **Dart SDK**: 3.5.0 or higher
-- **Linux**: glibc 2.7 or higher (Ubuntu 14.04+, Debian 8+, CentOS 7+, RHEL 7+)
-- **macOS**: 10.15 (Catalina) or higher
-- **Container detection**: Requires cgroups v2 (Kubernetes 1.25+ or Linux with cgroups v2 enabled)
-
-No C compiler is required - the package ships with pre-compiled binaries for all supported platforms.
+- **Linux**: No native dependencies (pure Dart implementation)
+- **macOS**: 10.15 (Catalina) or higher (uses pre-built dylibs)
+- **Container detection**: Supports cgroups v1 and v2
 
 ## Usage
 
@@ -22,10 +28,12 @@ No C compiler is required - the package ships with pre-compiled binaries for all
 import 'package:system_resources_2/system_resources_2.dart';
 
 void main() async {
+  // Initialize (required for macOS, no-op on Linux)
   await SystemResources.init();
 
   // Check if running in a container
   print('Container: ${SystemResources.isContainerEnv()}');
+  print('Cgroup version: ${SystemResources.cgroupVersion()}');
 
   // CPU information (auto-detects container limits)
   print('CPU Load Average : ${(SystemResources.cpuLoadAvg() * 100).toInt()}%');
@@ -40,23 +48,23 @@ void main() async {
 
 ## Container Support
 
-When running inside a container with cgroups v2, the library automatically:
-- Returns CPU load normalized by container CPU limit
+The library automatically detects container environments using cgroups:
+- Returns CPU load from cgroup accounting (not getloadavg)
 - Returns memory usage relative to container memory limit
 - Provides absolute values for limits and usage
 
 ### gVisor Support
 
-**CPU monitoring is not supported in gVisor.** gVisor does not virtualize the `getloadavg()` syscall, so `cpuLoadAvg()` always returns 0. For CPU monitoring in gVisor, use external solutions (e.g., Prometheus, Kubernetes metrics).
+Unlike the original implementation, **CPU monitoring works in gVisor**! This version uses cgroup CPU accounting (`/sys/fs/cgroup/cpu.stat`) instead of `getloadavg()`, which gVisor does virtualize.
 
-**Memory monitoring works correctly** in gVisor - it virtualizes `/proc/meminfo` to reflect container limits.
+**Memory monitoring** also works correctly via gVisor's virtualized `/proc/meminfo`.
 
-See [docs/GVISOR.md](docs/GVISOR.md) for details.
+See [doc/GVISOR.md](doc/GVISOR.md) for details.
 
 ### Running
 
 ```bash
-# Run directly
+# Run directly (no compilation needed on Linux!)
 dart run example/example.dart
 
 # Run tests
@@ -64,9 +72,9 @@ dart test
 
 # Compile to executable
 dart compile exe bin/my_app.dart -o my_app
-# Copy the library next to the executable
-cp lib/build/libsysres-linux-x86_64.so ./  # Linux x86_64
-# cp lib/build/libsysres-darwin-arm64.dylib ./  # macOS ARM
+# On macOS, copy the library next to the executable:
+# cp lib/build/libsysres-darwin-arm64.dylib ./
+# On Linux, no native library needed!
 ```
 
 ### Docker Example
@@ -79,9 +87,8 @@ COPY . .
 
 RUN dart pub get
 RUN dart compile exe bin/my_app.dart -o /app/my_app
-# Copy library next to executable
-RUN cp lib/build/libsysres-linux-x86_64.so /app/
 
+# No native library copy needed - Linux uses pure Dart!
 CMD ["/app/my_app"]
 ```
 
@@ -89,13 +96,14 @@ CMD ["/app/my_app"]
 
 ```bash
 # Build the test image
-docker build -t system_resources_test .
+docker build -f ci/Dockerfile.test -t system_resources_test .
 
 # Run with memory and CPU limits
 docker run --memory=256m --cpus=0.5 system_resources_test
 
 # Expected output:
 # Container: true
+# Cgroup version: CgroupVersion.v2
 # CPU Limit (cores): 0.5
 # Memory Limit: 268435456 bytes (256 MB)
 ```
@@ -104,56 +112,66 @@ docker run --memory=256m --cpus=0.5 system_resources_test
 
 | Function | Description |
 |----------|-------------|
-| `isContainerEnv()` | Returns `true` if running in a container with cgroups v2 |
+| `init()` | Initialize library (required for macOS, no-op on Linux) |
+| `isContainerEnv()` | Returns `true` if running in a container with cgroup limits |
+| `cgroupVersion()` | Returns detected cgroup version (v1, v2, or none) |
 | `cpuLoadAvg()` | CPU load normalized by available cores (container or host) |
 | `cpuLimitCores()` | CPU limit in cores (container limit or host cores) |
+| `cpuUsageMillicores()` | CPU usage in millicores (1000m = 1 core) |
 | `memUsage()` | Memory usage as fraction of limit (0.0 - 1.0) |
 | `memoryLimitBytes()` | Memory limit in bytes (container limit or host total) |
 | `memoryUsedBytes()` | Memory currently used in bytes |
 
-## Features
+## Platform Support
 
-### Linux
+### Linux (Pure Dart - No Native Dependencies)
 
-Function         | x86_64 | i686  | aarch64 | armv7l |
------------------|--------|-------|---------|--------|
-cpuLoadAvg       | 🟢     | 🟢    | 🟢      | 🟢     |
-cpuLimitCores    | 🟢     | 🟢    | 🟢      | 🟢     |
-memUsage         | 🟢     | 🟢    | 🟢      | 🟢     |
-memoryLimitBytes | 🟢     | 🟢    | 🟢      | 🟢     |
-memoryUsedBytes  | 🟢     | 🟢    | 🟢      | 🟢     |
-isContainerEnv   | 🟢     | 🟢    | 🟢      | 🟢     |
+| Function         | x86_64 | aarch64 | armv7l | i686 |
+|------------------|--------|---------|--------|------|
+| cpuLoadAvg       | ✅     | ✅      | ✅     | ✅   |
+| cpuLimitCores    | ✅     | ✅      | ✅     | ✅   |
+| memUsage         | ✅     | ✅      | ✅     | ✅   |
+| memoryLimitBytes | ✅     | ✅      | ✅     | ✅   |
+| memoryUsedBytes  | ✅     | ✅      | ✅     | ✅   |
+| isContainerEnv   | ✅     | ✅      | ✅     | ✅   |
 
-### macOS
+### macOS (FFI with Pre-built Dylibs)
 
-Function         | Intel | M1  |
------------------|-------|-----|
-cpuLoadAvg       | 🟢    | 🟢  |
-cpuLimitCores    | 🟢    | 🟢  |
-memUsage         | 🟢    | 🟢  |
-memoryLimitBytes | 🟢    | 🟢  |
-memoryUsedBytes  | 🟢    | 🟢  |
-isContainerEnv   | 🟢    | 🟢  |
+| Function         | Intel | Apple Silicon |
+|------------------|-------|---------------|
+| cpuLoadAvg       | ✅    | ✅            |
+| cpuLimitCores    | ✅    | ✅            |
+| memUsage         | ✅    | ✅            |
+| memoryLimitBytes | ✅    | ✅            |
+| memoryUsedBytes  | ✅    | ✅            |
+| isContainerEnv   | ✅    | ✅            |
 
 Note: On macOS, `isContainerEnv()` always returns `false` as containers are not natively supported.
 
 ### Windows
 
-Function   | 64 bit | 32 bit | ARMv7 | ARMv8+ |
------------|--------|--------|-------|--------|
-cpuLoadAvg | 🔴     | 🔴     | 🔴    | 🔴     |
-memUsage   | 🔴     | 🔴     | 🔴    | 🔴     |
+Not currently supported.
 
+## Architecture
 
-🟢 : Coded, Compiled, Tested
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    SystemResources API                       │
+├─────────────────────────────────────────────────────────────┤
+│  Linux (Pure Dart)           │  macOS (FFI)                 │
+│  ├─ cgroup_cpu.dart          │  └─ macos_ffi.dart           │
+│  ├─ cgroup_memory.dart       │      └─ libsysres-darwin-*.  │
+│  └─ cgroup_detector.dart     │          dylib               │
+│      │                       │                               │
+│      ▼                       │                               │
+│  /sys/fs/cgroup/* (v1/v2)    │                               │
+│  /proc/loadavg (host)        │                               │
+│  /proc/meminfo (fallback)    │                               │
+└─────────────────────────────────────────────────────────────┘
+```
 
-🟠 : Coded, Not Compiled
+## Contributing
 
-🔴 : No Code
+You are free to improve and contribute to this package.
 
-## Improve, compile & test
-
-You are free to improve, compile and test `libsysres` C code for any platform not fully supported.
-
-Github
-[Issues](https://github.com/serverpod/system_resources_2/issues) | [Pull requests](https://github.com/serverpod/system_resources_2/pulls)
+GitHub: [Issues](https://github.com/serverpod/system_resources_2/issues) | [Pull requests](https://github.com/serverpod/system_resources_2/pulls)
