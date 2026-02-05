@@ -1,16 +1,19 @@
 # Dockerfile for building i686 (32-bit x86) Linux binary
 #
 # Uses cross-compilation with gcc -m32 on an amd64 container.
-# Uses gcc:10 (Debian buster) which produces binaries requiring only glibc 2.7.
-# The gcc-multilib layer is cached after the first build.
+# Uses debian:bookworm (matching Dockerfile.test-i686) instead of gcc:10,
+# because gcc:10 installs GCC to /usr/local without multilib support.
 #
 # Usage:
 #   docker build --platform linux/amd64 -f ci/Dockerfile.build-i686 --output type=local,dest=lib/build .
 
-FROM gcc:10 AS builder
+FROM debian:bookworm AS builder
 
-# Install multilib support for 32-bit cross-compilation (cached after first build)
-RUN apt-get update && apt-get install -y gcc-multilib && rm -rf /var/lib/apt/lists/*
+# Install build tools with multilib support for 32-bit cross-compilation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc-multilib \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
