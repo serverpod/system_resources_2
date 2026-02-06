@@ -24,5 +24,5 @@
 /// ```
 library;
 
-export 'src/cgroup_detector.dart' show CgroupVersion;
+export 'src/cgroup_detector.dart' show CgroupVersion, DetectedPlatform;
 export 'src/system_resources.dart' show SystemResources;

@@ -4,39 +4,28 @@ import 'cgroup_detector.dart';
 
 /// Memory monitoring using cgroup metrics.
 ///
-/// Reads memory usage and limits from cgroup v1/v2 files,
-/// with fallback to /proc/meminfo for host environments.
+/// Provides per-cgroup-version reader methods that are called directly
+/// from `SystemResources` via a flat switch on [DetectedPlatform].
+///
+/// Falls back to `/proc/meminfo` for host environments.
 class CgroupMemory {
-  /// Gets the memory limit in bytes.
-  ///
-  /// For cgroup v2: reads `/sys/fs/cgroup/memory.max`
-  /// For cgroup v1: reads `/sys/fs/cgroup/memory/memory.limit_in_bytes`
-  /// Fallback: reads MemTotal from `/proc/meminfo`
-  ///
-  /// Returns the memory limit, or total system memory if not in a container.
-  static int getLimitBytes() {
-    final version = CgroupDetector.detectVersion();
-
-    if (version == CgroupVersion.v2) {
-      final limit = _readCgroupV2Limit();
-      if (limit > 0) return limit;
-    } else if (version == CgroupVersion.v1) {
-      final limit = _readCgroupV1Limit();
-      if (limit > 0) return limit;
-    }
-
-    // Fallback to /proc/meminfo
-    return _readProcMemTotal();
-  }
+  // ---------------------------------------------------------------------------
+  // Memory limit readers (bytes)
+  // ---------------------------------------------------------------------------
 
   /// Reads memory limit from cgroup v2.
-  static int _readCgroupV2Limit() {
+  ///
+  /// Reads `/sys/fs/cgroup/memory.max`. Returns the numeric limit in bytes,
+  /// or falls back to `/proc/meminfo` MemTotal if the value is `"max"`
+  /// (unlimited).
+  /// Returns 0 if unable to read.
+  static int readV2LimitBytes() {
     try {
       final content =
           File(CgroupDetector.cgroupV2MemoryMax).readAsStringSync().trim();
       if (content == 'max') {
         // Unlimited - fall back to system memory
-        return _readProcMemTotal();
+        return readProcMemTotal();
       }
       return int.tryParse(content) ?? 0;
     } catch (_) {}
@@ -44,7 +33,11 @@ class CgroupMemory {
   }
 
   /// Reads memory limit from cgroup v1.
-  static int _readCgroupV1Limit() {
+  ///
+  /// Reads `/sys/fs/cgroup/memory/memory.limit_in_bytes`. Very large values
+  /// (>9e18) indicate no limit, in which case falls back to MemTotal.
+  /// Returns 0 if unable to read.
+  static int readV1LimitBytes() {
     try {
       final content =
           File(CgroupDetector.cgroupV1MemoryLimit).readAsStringSync().trim();
@@ -52,7 +45,7 @@ class CgroupMemory {
       if (limit != null) {
         // Very large values indicate no limit
         if (limit > 9000000000000000000) {
-          return _readProcMemTotal();
+          return readProcMemTotal();
         }
         return limit;
       }
@@ -60,8 +53,42 @@ class CgroupMemory {
     return 0;
   }
 
-  /// Reads MemTotal from /proc/meminfo.
-  static int _readProcMemTotal() {
+  // ---------------------------------------------------------------------------
+  // Memory used readers (bytes)
+  // ---------------------------------------------------------------------------
+
+  /// Reads memory usage from cgroup v2.
+  ///
+  /// Reads `/sys/fs/cgroup/memory.current`.
+  /// Returns 0 if unable to read.
+  static int readV2UsedBytes() {
+    try {
+      final content =
+          File(CgroupDetector.cgroupV2MemoryCurrent).readAsStringSync().trim();
+      return int.tryParse(content) ?? 0;
+    } catch (_) {}
+    return 0;
+  }
+
+  /// Reads memory usage from cgroup v1.
+  ///
+  /// Reads `/sys/fs/cgroup/memory/memory.usage_in_bytes`.
+  /// Returns 0 if unable to read.
+  static int readV1UsedBytes() {
+    try {
+      final content =
+          File(CgroupDetector.cgroupV1MemoryUsage).readAsStringSync().trim();
+      return int.tryParse(content) ?? 0;
+    } catch (_) {}
+    return 0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // /proc fallback
+  // ---------------------------------------------------------------------------
+
+  /// Reads MemTotal from `/proc/meminfo` in bytes.
+  static int readProcMemTotal() {
     try {
       final content = File(CgroupDetector.procMeminfo).readAsStringSync();
       for (final line in content.split('\n')) {
@@ -80,50 +107,8 @@ class CgroupMemory {
     return 0;
   }
 
-  /// Gets the memory currently used in bytes.
-  ///
-  /// For cgroup v2: reads `/sys/fs/cgroup/memory.current`
-  /// For cgroup v1: reads `/sys/fs/cgroup/memory/memory.usage_in_bytes`
-  /// Fallback: calculates from /proc/meminfo (MemTotal - MemAvailable)
-  ///
-  /// Returns current memory usage in bytes.
-  static int getUsedBytes() {
-    final version = CgroupDetector.detectVersion();
-
-    if (version == CgroupVersion.v2) {
-      final used = _readCgroupV2Used();
-      if (used > 0) return used;
-    } else if (version == CgroupVersion.v1) {
-      final used = _readCgroupV1Used();
-      if (used > 0) return used;
-    }
-
-    // Fallback to /proc/meminfo calculation
-    return _readProcMemUsed();
-  }
-
-  /// Reads memory usage from cgroup v2.
-  static int _readCgroupV2Used() {
-    try {
-      final content =
-          File(CgroupDetector.cgroupV2MemoryCurrent).readAsStringSync().trim();
-      return int.tryParse(content) ?? 0;
-    } catch (_) {}
-    return 0;
-  }
-
-  /// Reads memory usage from cgroup v1.
-  static int _readCgroupV1Used() {
-    try {
-      final content =
-          File(CgroupDetector.cgroupV1MemoryUsage).readAsStringSync().trim();
-      return int.tryParse(content) ?? 0;
-    } catch (_) {}
-    return 0;
-  }
-
-  /// Calculates memory used from /proc/meminfo.
-  static int _readProcMemUsed() {
+  /// Calculates memory used from `/proc/meminfo` (MemTotal - MemAvailable).
+  static int readProcMemUsed() {
     try {
       final content = File(CgroupDetector.procMeminfo).readAsStringSync();
       int? memTotal;
@@ -148,17 +133,5 @@ class CgroupMemory {
       }
     } catch (_) {}
     return 0;
-  }
-
-  /// Gets memory usage as a fraction of the limit.
-  ///
-  /// Returns a value between 0.0 and 1.0 representing the fraction
-  /// of memory currently in use.
-  static double getUsage() {
-    final limit = getLimitBytes();
-    if (limit <= 0) return 0.0;
-
-    final used = getUsedBytes();
-    return used / limit;
   }
 }

@@ -69,11 +69,9 @@ class SystemResources {
     if (_initialized) return;
     _initialized = true;
 
-    // On macOS: initialize FFI
-    if (Platform.isMacOS) {
+    if (CgroupDetector.detectPlatform() == DetectedPlatform.macOS) {
       MacOsFfi.init();
     }
-    // On Linux: no-op, pure Dart implementation
   }
 
   /// Ensures macOS FFI is initialized. Throws if init() wasn't called.
@@ -84,23 +82,42 @@ class SystemResources {
       );
     }
   }
+
   /// Returns `true` if running in a detected container environment.
   ///
   /// Container detection is based on the presence of cgroup memory limits.
   /// Returns `false` on non-Linux platforms or when running on a host
   /// without container limits.
-  static bool isContainerEnv() {
-    return CgroupDetector.isContainerEnv();
-  }
+  static bool isContainerEnv() => CgroupDetector.isContainerEnv();
 
   /// Returns the detected cgroup version.
   ///
   /// Returns [CgroupVersion.v2] for modern unified hierarchy,
   /// [CgroupVersion.v1] for legacy hierarchy, or [CgroupVersion.none]
   /// if no cgroups are detected (e.g., on macOS or non-containerized Linux).
-  static CgroupVersion cgroupVersion() {
-    return CgroupDetector.detectVersion();
-  }
+  static CgroupVersion cgroupVersion() => CgroupDetector.detectVersion();
+
+  // ---------------------------------------------------------------------------
+  // CPU
+  // ---------------------------------------------------------------------------
+
+  /// Returns the cgroup usage-micros reader for the current platform,
+  /// or `null` if the platform doesn't support cgroup CPU accounting.
+  static int Function()? get _usageMicrosReader =>
+      switch (CgroupDetector.detectPlatform()) {
+        DetectedPlatform.linuxCgroupV2 => CgroupCpu.readV2UsageMicros,
+        DetectedPlatform.linuxCgroupV1 => CgroupCpu.readV1UsageMicros,
+        _ => null,
+      };
+
+  /// Returns the cgroup limit-millicores reader for the current platform,
+  /// or `null` if the platform doesn't support cgroup CPU limits.
+  static int Function()? get _limitMillicoresReader =>
+      switch (CgroupDetector.detectPlatform()) {
+        DetectedPlatform.linuxCgroupV2 => CgroupCpu.readV2LimitMillicores,
+        DetectedPlatform.linuxCgroupV1 => CgroupCpu.readV1LimitMillicores,
+        _ => null,
+      };
 
   /// Get CPU load average normalized by CPU limit/count.
   ///
@@ -116,16 +133,19 @@ class SystemResources {
   /// - **macOS**: Uses native FFI (requires [init()] to be called first).
   ///
   /// Returns a value where 1.0 means 100% CPU utilization.
-  static double cpuLoadAvg() {
-    if (Platform.isMacOS) {
-      _ensureMacOsInit();
-      return MacOsFfi.cpuLoadAvg();
-    }
-    if (Platform.isLinux) {
-      return CgroupCpu.getLoadAvg();
-    }
-    return 0.0;
-  }
+  static double cpuLoadAvg() => switch (CgroupDetector.detectPlatform()) {
+        DetectedPlatform.macOS => _macOsCpuLoadAvg(),
+        DetectedPlatform.linuxCgroupV2 => CgroupCpu.getLoad(
+            CgroupCpu.readV2UsageMicros,
+            CgroupCpu.readV2LimitMillicores,
+          ),
+        DetectedPlatform.linuxCgroupV1 => CgroupCpu.getLoad(
+            CgroupCpu.readV1UsageMicros,
+            CgroupCpu.readV1LimitMillicores,
+          ),
+        DetectedPlatform.linuxHost => CgroupCpu.readProcLoadAvg(),
+        DetectedPlatform.unsupported => 0.0,
+      };
 
   /// Get CPU load as a fraction of the limit (cgroup-based only).
   ///
@@ -139,8 +159,10 @@ class SystemResources {
   /// On non-Linux platforms or hosts without cgroups, returns 0.0.
   /// Use [cpuLoadAvg()] for broader compatibility.
   static double cpuLoad() {
-    if (!Platform.isLinux) return 0.0;
-    return CgroupCpu.getLoad();
+    final usageReader = _usageMicrosReader;
+    final limitReader = _limitMillicoresReader;
+    if (usageReader == null || limitReader == null) return 0.0;
+    return CgroupCpu.getLoad(usageReader, limitReader);
   }
 
   /// Get CPU usage in millicores (1000m = 1 full CPU core).
@@ -154,8 +176,9 @@ class SystemResources {
   ///
   /// On non-Linux platforms, always returns 0.
   static int cpuUsageMillicores() {
-    if (!Platform.isLinux) return 0;
-    return CgroupCpu.getUsageMillicores();
+    final reader = _usageMicrosReader;
+    if (reader == null) return 0;
+    return CgroupCpu.getUsageMillicores(reader);
   }
 
   /// Get raw CPU usage in microseconds from cgroup accounting.
@@ -164,10 +187,11 @@ class SystemResources {
   /// container since it started. Useful for custom delta calculations.
   ///
   /// On non-Linux platforms, always returns 0.
-  static int cpuUsageMicros() {
-    if (!Platform.isLinux) return 0;
-    return CgroupCpu.getUsageMicros();
-  }
+  static int cpuUsageMicros() => switch (CgroupDetector.detectPlatform()) {
+        DetectedPlatform.linuxCgroupV2 => CgroupCpu.readV2UsageMicros(),
+        DetectedPlatform.linuxCgroupV1 => CgroupCpu.readV1UsageMicros(),
+        _ => 0,
+      };
 
   /// Get the CPU limit in cores.
   ///
@@ -179,28 +203,32 @@ class SystemResources {
   /// The `SYSRES_CPU_CORES` environment variable can be used to override
   /// this value, which is useful for gVisor environments that don't
   /// expose cgroup limits.
-  static double cpuLimitCores() {
-    if (Platform.isMacOS) {
-      _ensureMacOsInit();
-      return MacOsFfi.cpuLimitCores();
-    }
-    if (Platform.isLinux) {
-      return CgroupCpu.getLimitCores();
-    }
-    return Platform.numberOfProcessors.toDouble();
-  }
+  static double cpuLimitCores() => switch (CgroupDetector.detectPlatform()) {
+        DetectedPlatform.macOS => _macOsCpuLimitCores(),
+        DetectedPlatform.linuxCgroupV2 =>
+          CgroupCpu.getLimitCores(CgroupCpu.readV2LimitMillicores),
+        DetectedPlatform.linuxCgroupV1 =>
+          CgroupCpu.getLimitCores(CgroupCpu.readV1LimitMillicores),
+        DetectedPlatform.linuxHost =>
+          Platform.numberOfProcessors.toDouble(),
+        DetectedPlatform.unsupported =>
+          Platform.numberOfProcessors.toDouble(),
+      };
 
   /// Get the CPU limit in millicores (1000m = 1 full CPU core).
   ///
   /// Returns -1 if unlimited or unable to determine.
   ///
   /// On non-Linux platforms, returns host CPU count * 1000.
-  static int cpuLimitMillicores() {
-    if (!Platform.isLinux) {
-      return Platform.numberOfProcessors * 1000;
-    }
-    return CgroupCpu.getLimitMillicores();
-  }
+  static int cpuLimitMillicores() => switch (CgroupDetector.detectPlatform()) {
+        DetectedPlatform.linuxCgroupV2 => CgroupCpu.readV2LimitMillicores(),
+        DetectedPlatform.linuxCgroupV1 => CgroupCpu.readV1LimitMillicores(),
+        _ => Platform.numberOfProcessors * 1000,
+      };
+
+  // ---------------------------------------------------------------------------
+  // Memory
+  // ---------------------------------------------------------------------------
 
   /// Get memory usage as a fraction of the limit.
   ///
@@ -210,50 +238,68 @@ class SystemResources {
   /// In a container environment, this is relative to the container's
   /// memory limit. On host, this is relative to total system memory.
   static double memUsage() {
-    if (Platform.isMacOS) {
-      _ensureMacOsInit();
-      return MacOsFfi.memUsage();
-    }
-    if (Platform.isLinux) {
-      return CgroupMemory.getUsage();
-    }
-    return 0.0;
+    final limit = memoryLimitBytes();
+    if (limit <= 0) return 0.0;
+    final used = memoryUsedBytes();
+    return used / limit;
   }
 
   /// Get the memory limit in bytes.
   ///
   /// In a container environment, returns the container's memory limit.
   /// On host, returns total system memory.
-  static int memoryLimitBytes() {
-    if (Platform.isMacOS) {
-      _ensureMacOsInit();
-      return MacOsFfi.memoryLimitBytes();
-    }
-    if (Platform.isLinux) {
-      return CgroupMemory.getLimitBytes();
-    }
-    return 0;
-  }
+  static int memoryLimitBytes() => switch (CgroupDetector.detectPlatform()) {
+        DetectedPlatform.macOS => _macOsMemoryLimitBytes(),
+        DetectedPlatform.linuxCgroupV2 => CgroupMemory.readV2LimitBytes(),
+        DetectedPlatform.linuxCgroupV1 => CgroupMemory.readV1LimitBytes(),
+        DetectedPlatform.linuxHost => CgroupMemory.readProcMemTotal(),
+        DetectedPlatform.unsupported => 0,
+      };
 
   /// Get the memory currently used in bytes.
   ///
   /// In a container environment, returns the container's current memory usage.
   /// On host, returns system memory usage (MemTotal - MemAvailable).
-  static int memoryUsedBytes() {
-    if (Platform.isMacOS) {
-      _ensureMacOsInit();
-      return MacOsFfi.memoryUsedBytes();
-    }
-    if (Platform.isLinux) {
-      return CgroupMemory.getUsedBytes();
-    }
-    return 0;
+  static int memoryUsedBytes() => switch (CgroupDetector.detectPlatform()) {
+        DetectedPlatform.macOS => _macOsMemoryUsedBytes(),
+        DetectedPlatform.linuxCgroupV2 => CgroupMemory.readV2UsedBytes(),
+        DetectedPlatform.linuxCgroupV1 => CgroupMemory.readV1UsedBytes(),
+        DetectedPlatform.linuxHost => CgroupMemory.readProcMemUsed(),
+        DetectedPlatform.unsupported => 0,
+      };
+
+  // ---------------------------------------------------------------------------
+  // macOS FFI helpers (guard init)
+  // ---------------------------------------------------------------------------
+
+  static double _macOsCpuLoadAvg() {
+    _ensureMacOsInit();
+    return MacOsFfi.cpuLoadAvg();
   }
+
+  static double _macOsCpuLimitCores() {
+    _ensureMacOsInit();
+    return MacOsFfi.cpuLimitCores();
+  }
+
+  static int _macOsMemoryLimitBytes() {
+    _ensureMacOsInit();
+    return MacOsFfi.memoryLimitBytes();
+  }
+
+  static int _macOsMemoryUsedBytes() {
+    _ensureMacOsInit();
+    return MacOsFfi.memoryUsedBytes();
+  }
+
+  // ---------------------------------------------------------------------------
+  // State management
+  // ---------------------------------------------------------------------------
 
   /// Clears all cached state. Useful for testing.
   ///
   /// This resets:
-  /// - Cached cgroup version detection
+  /// - Cached platform detection
   /// - Cached container detection
   /// - CPU usage delta state
   static void clearState() {

@@ -12,9 +12,28 @@ enum CgroupVersion {
   none,
 }
 
-/// Detects cgroup version and container environment.
+/// The resolved runtime environment, combining OS and cgroup detection
+/// into a single flat enum for dispatch.
+enum DetectedPlatform {
+  /// macOS — uses native FFI for all metrics.
+  macOS,
+
+  /// Linux with cgroup v2 (unified hierarchy).
+  linuxCgroupV2,
+
+  /// Linux with cgroup v1 (legacy hierarchy).
+  linuxCgroupV1,
+
+  /// Linux without cgroups — falls back to /proc.
+  linuxHost,
+
+  /// Unsupported OS — all metrics return zero.
+  unsupported,
+}
+
+/// Detects cgroup version, platform, and container environment.
 class CgroupDetector {
-  static CgroupVersion? _cachedVersion;
+  static DetectedPlatform? _cachedPlatform;
   static bool? _cachedIsContainer;
 
   /// Cgroup v2 paths
@@ -41,82 +60,89 @@ class CgroupDetector {
   /// Host fallback paths
   static const procMeminfo = '/proc/meminfo';
   static const procStat = '/proc/stat';
+  static const procLoadAvg = '/proc/loadavg';
+
+  /// Detects the runtime platform and cgroup environment.
+  ///
+  /// Combines OS detection and cgroup version probing into a single
+  /// cached [DetectedPlatform] value used for dispatch.
+  static DetectedPlatform detectPlatform() {
+    if (_cachedPlatform != null) return _cachedPlatform!;
+
+    if (Platform.isMacOS) {
+      _cachedPlatform = DetectedPlatform.macOS;
+    } else if (Platform.isLinux) {
+      if (File(cgroupV2CpuStat).existsSync()) {
+        _cachedPlatform = DetectedPlatform.linuxCgroupV2;
+      } else if (File(cgroupV1CpuAcctUsage).existsSync() ||
+          File(cgroupV1CpuAcctUsageAlt).existsSync()) {
+        _cachedPlatform = DetectedPlatform.linuxCgroupV1;
+      } else {
+        _cachedPlatform = DetectedPlatform.linuxHost;
+      }
+    } else {
+      _cachedPlatform = DetectedPlatform.unsupported;
+    }
+
+    return _cachedPlatform!;
+  }
 
   /// Detects the cgroup version available on this system.
+  ///
+  /// Derived from [detectPlatform] for backward compatibility.
   ///
   /// Returns [CgroupVersion.v2] if cgroup v2 files are present,
   /// [CgroupVersion.v1] if cgroup v1 files are present,
   /// or [CgroupVersion.none] if no cgroups are detected.
-  static CgroupVersion detectVersion() {
-    if (_cachedVersion != null) return _cachedVersion!;
-
-    if (!Platform.isLinux) {
-      _cachedVersion = CgroupVersion.none;
-      return _cachedVersion!;
-    }
-
-    // Check for cgroup v2 first (preferred)
-    if (File(cgroupV2CpuStat).existsSync()) {
-      _cachedVersion = CgroupVersion.v2;
-      return _cachedVersion!;
-    }
-
-    // Check for cgroup v1
-    if (File(cgroupV1CpuAcctUsage).existsSync() ||
-        File(cgroupV1CpuAcctUsageAlt).existsSync()) {
-      _cachedVersion = CgroupVersion.v1;
-      return _cachedVersion!;
-    }
-
-    _cachedVersion = CgroupVersion.none;
-    return _cachedVersion!;
-  }
+  static CgroupVersion detectVersion() => switch (detectPlatform()) {
+        DetectedPlatform.linuxCgroupV2 => CgroupVersion.v2,
+        DetectedPlatform.linuxCgroupV1 => CgroupVersion.v1,
+        _ => CgroupVersion.none,
+      };
 
   /// Returns true if running in a detected container environment.
   ///
-  /// Container detection is based on the presence of cgroup CPU or memory
-  /// accounting files. Returns false on non-Linux platforms.
+  /// Container detection is based on the presence of cgroup memory limits.
+  /// Returns false on non-Linux platforms or when no container limit is set.
   static bool isContainerEnv() {
     if (_cachedIsContainer != null) return _cachedIsContainer!;
 
-    if (!Platform.isLinux) {
-      _cachedIsContainer = false;
+    _cachedIsContainer = switch (detectPlatform()) {
+      DetectedPlatform.linuxCgroupV2 => _detectContainerV2(),
+      DetectedPlatform.linuxCgroupV1 => _detectContainerV1(),
+      _ => false,
+    };
+
+    return _cachedIsContainer!;
+  }
+
+  /// Checks cgroup v2 memory.max for a container limit.
+  static bool _detectContainerV2() {
+    try {
+      final content = File(cgroupV2MemoryMax).readAsStringSync().trim();
+      // "max" means unlimited (likely host), a number means container limit
+      return content != 'max';
+    } catch (_) {
       return false;
     }
+  }
 
-    final version = detectVersion();
-    if (version == CgroupVersion.v2) {
-      // Check if we have memory limits set (indicates container)
-      final memMax = File(cgroupV2MemoryMax);
-      if (memMax.existsSync()) {
-        try {
-          final content = memMax.readAsStringSync().trim();
-          // "max" means unlimited (likely host), a number means container limit
-          _cachedIsContainer = content != 'max';
-          return _cachedIsContainer!;
-        } catch (_) {}
-      }
-    } else if (version == CgroupVersion.v1) {
-      // Check if memory limit is set
-      final memLimit = File(cgroupV1MemoryLimit);
-      if (memLimit.existsSync()) {
-        try {
-          final limit = int.tryParse(memLimit.readAsStringSync().trim());
-          // Very large values indicate no limit (host)
-          // Typically 9223372036854771712 or similar
-          _cachedIsContainer = limit != null && limit < 9000000000000000000;
-          return _cachedIsContainer!;
-        } catch (_) {}
-      }
+  /// Checks cgroup v1 memory.limit_in_bytes for a container limit.
+  static bool _detectContainerV1() {
+    try {
+      final limit =
+          int.tryParse(File(cgroupV1MemoryLimit).readAsStringSync().trim());
+      // Very large values indicate no limit (host)
+      // Typically 9223372036854771712 or similar
+      return limit != null && limit < 9000000000000000000;
+    } catch (_) {
+      return false;
     }
-
-    _cachedIsContainer = false;
-    return false;
   }
 
   /// Clears cached detection results. Useful for testing.
   static void clearCache() {
-    _cachedVersion = null;
+    _cachedPlatform = null;
     _cachedIsContainer = null;
   }
 }
