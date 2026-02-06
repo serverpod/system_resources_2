@@ -1,0 +1,27 @@
+# Dockerfile for testing library compatibility across dart versions
+#
+# Tests that the native library loads and works correctly on different
+# dart images (which use different glibc versions).
+#
+# Build and run:
+#   docker build --build-arg DART_VERSION=3.8 -f ci/Dockerfile.test-compat -t test .
+#   docker run --rm test
+
+ARG DART_VERSION=stable
+FROM dart:${DART_VERSION}
+
+WORKDIR /app
+
+# Copy package files
+COPY pubspec.yaml .
+COPY lib/ lib/
+COPY example/ example/
+
+# Get dependencies
+RUN dart pub get
+
+# Print glibc version for diagnostics
+RUN echo "=== dart:${DART_VERSION} - glibc version ===" && ldd --version | head -1
+
+# Run the example to verify library loads and works
+CMD ["dart", "run", "example/example.dart"]

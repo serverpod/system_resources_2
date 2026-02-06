@@ -8,37 +8,128 @@ on:
     branches: [main, master]
 
 jobs:
+  check-source-changed:
+    name: Check if native source changed
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Check for source or build-config changes
+        id: check
+        run: |
+          # Skip if last commit was an auto-rebuild (prevents loops).
+          LAST_MSG=$(git log -1 --format='%s')
+          if [ "$LAST_MSG" = "chore: rebuild macOS native binaries" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          if echo "$CHANGED_FILES" | grep -qE '^lib/src/libsysres/.*\.(c|h)$'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          elif echo "$CHANGED_FILES" | grep -qE '^ci/Dockerfile\.build'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          elif echo "$CHANGED_FILES" | grep -qE '^Makefile$'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          elif echo "$CHANGED_FILES" | grep -qE '^lib/build/libsysres-darwin'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  build-darwin-arm64:
+    name: Build darwin-arm64
+    needs: check-source-changed
+    if: needs.check-source-changed.outputs.changed == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - run: make
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+        with:
+          name: libsysres-darwin-arm64
+          path: lib/build/libsysres-darwin-arm64.dylib
+          retention-days: 1
+
+  build-darwin-x86_64:
+    name: Build darwin-x86_64
+    needs: check-source-changed
+    if: needs.check-source-changed.outputs.changed == 'true'
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - run: make
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+        with:
+          name: libsysres-darwin-x86_64
+          path: lib/build/libsysres-darwin-x86_64.dylib
+          retention-days: 1
+
   analyze:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1.7.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c  # v1.7.1
         with:
           sdk: stable
       - run: dart pub get
       - run: dart analyze
 
-  test-native:
-    name: test-native (${{ matrix.name }})
+  test-linux:
+    name: test-linux (${{ matrix.name }})
     strategy:
       matrix:
         include:
-          - name: linux-amd64
+          - name: amd64
             os: ubuntu-latest
-          - name: linux-arm64
+          - name: arm64
             os: ubuntu-24.04-arm
-          - name: macos-arm64
-            os: macos-latest
-          - name: macos-intel
-            os: macos-15-intel
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c # v1.7.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c  # v1.7.1
         with:
           sdk: stable
-      - name: Build native library
-        run: make
+      - run: dart pub get
+      - run: dart test
+
+  test-macos:
+    name: test-macos (${{ matrix.name }})
+    needs: [check-source-changed, build-darwin-arm64, build-darwin-x86_64]
+    # always() so this still runs when build jobs were skipped (no source change / push event).
+    if: >-
+      always() && !cancelled() && needs.build-darwin-arm64.result != 'failure' && needs.build-darwin-x86_64.result != 'failure'
+    strategy:
+      matrix:
+        include:
+          - name: arm64
+            os: macos-latest
+            artifact: libsysres-darwin-arm64
+          - name: intel
+            os: macos-15-intel
+            artifact: libsysres-darwin-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: dart-lang/setup-dart@e51d8e571e22473a2ddebf0ef8a2123f0ab2c02c  # v1.7.1
+        with:
+          sdk: stable
+
+      - name: Download rebuilt binary
+        if: needs.check-source-changed.outputs.changed == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: ${{ matrix.artifact }}
+          path: lib/build/
+
       - run: dart pub get
       - run: dart test
 
@@ -53,24 +144,21 @@ jobs:
           - arch: arm64
             platform: linux/arm64
             qemu: arm64
-          - arch: armv7l
-            platform: linux/arm/v7
-            qemu: arm
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
       - name: Set up QEMU
         if: matrix.qemu != ''
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130  # v3.7.0
         with:
           platforms: ${{ matrix.qemu }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
 
       - name: Build and test
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83  # v6.18.0
         with:
           context: .
           file: ci/Dockerfile.test
@@ -79,21 +167,67 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
-  test-container-i686:
-    name: test-container (i686)
+  commit-binaries:
+    name: Commit binaries and post checksums
+    needs:
+      - check-source-changed
+      - build-darwin-arm64
+      - build-darwin-x86_64
+    if: needs.check-source-changed.outputs.changed == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      - name: Build and test
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
-          context: .
-          file: ci/Dockerfile.test-i686
-          platforms: linux/amd64
-          push: false
-          cache-from: type=gha,scope=i686
-          cache-to: type=gha,mode=max,scope=i686
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          pattern: libsysres-darwin-*
+          path: artifacts
+
+      - name: Copy binaries to lib/build
+        run: |
+          mkdir -p lib/build
+          cp artifacts/libsysres-darwin-arm64/libsysres-darwin-arm64.dylib lib/build/
+          cp artifacts/libsysres-darwin-x86_64/libsysres-darwin-x86_64.dylib lib/build/
+
+      - name: Compute checksums
+        id: checksums
+        run: |
+          cd lib/build
+          md5sum libsysres-darwin-* | sort > checksums.md5
+          cat checksums.md5
+          echo "checksums<<EOF" >> $GITHUB_OUTPUT
+          cat checksums.md5 >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - uses: stefanzweifel/git-auto-commit-action@04702edda442b2e678b25b537cec683a1493fcb9  # v7.1.0
+        with:
+          commit_message: "chore: rebuild macOS native binaries"
+          file_pattern: "lib/build/*.dylib lib/build/checksums.md5"
+
+      - name: Write PR comment body
+        run: |
+          cat > /tmp/pr-comment.md << 'COMMENT'
+          ## macOS Binaries Rebuilt
+
+          The macOS native binaries have been automatically rebuilt from source.
+          Linux uses pure Dart implementation (no native binaries needed).
+
+          ### MD5 Checksums
+          ```
+          ${{ steps.checksums.outputs.checksums }}
+          ```
+
+          These checksums can be used to verify the provenance of the binaries.
+          COMMENT
+
+      - name: Post PR comment with checksums
+        uses: thollander/actions-comment-pull-request@65f9e5c9a1f2cd378bd74b2e057c9736982a8e74  # v3
+        with:
+          comment-tag: macos-binaries
+          file-path: /tmp/pr-comment.md

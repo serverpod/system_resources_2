@@ -4,107 +4,111 @@ This document describes how the `system_resources_2` library behaves in gVisor e
 
 ## Summary
 
-**CPU monitoring is not supported in gVisor.** Use external monitoring solutions (Prometheus, Kubernetes metrics) for CPU usage.
+This version uses **cgroup CPU accounting** instead of `getloadavg()`, which may provide better gVisor compatibility depending on your gVisor configuration.
 
-**Memory monitoring works correctly** in gVisor.
+| Feature | Standard Container | gVisor (cgroups exposed) | gVisor (cgroups not exposed) |
+|---------|-------------------|--------------------------|------------------------------|
+| CPU load | Works | Works | Returns 0 |
+| CPU limit | Auto-detected | Auto-detected | Uses `SYSRES_CPU_CORES` env or host cores |
+| Memory limit | Auto-detected | Works (virtualized) | Works (virtualized) |
+| Memory usage | Works | Works | Works |
+| Container detection | Works | Works | Returns `false` |
 
-## Compatibility Table
+## How This Version Differs
 
-| Feature | Standard Container | gVisor Container |
-|---------|-------------------|------------------|
-| Container detection | Works (cgroups v2) | Returns `false` |
-| CPU load average | Works | **Not supported (returns 0)** |
-| CPU limit | Auto-detected | Returns host cores |
-| Memory limit | Auto-detected | Works (virtualized `/proc/meminfo`) |
-| Memory usage | Accurate | Works correctly |
+### Previous Approach (getloadavg)
+The original implementation used the `getloadavg()` syscall, which gVisor does **not** virtualize. This always returned 0 in gVisor.
 
-## Why gVisor Behaves Differently
+### New Approach (cgroup accounting)
+This version reads CPU usage from cgroup files:
+- `/sys/fs/cgroup/cpu.stat` (cgroups v2) - reads `usage_usec`
+- `/sys/fs/cgroup/cpuacct/cpuacct.usage` (cgroups v1) - reads nanoseconds
 
-gVisor is a sandboxed container runtime that implements its own Linux-compatible kernel in userspace. This affects how system information is exposed:
+This measures **actual CPU time consumed** by the container, not load average.
 
-### What gVisor Virtualizes
+## gVisor Cgroup Support
 
-| Resource | gVisor Behavior |
-|----------|-----------------|
-| `/proc/meminfo` | Virtualized to show container memory limit |
-| `/proc/self/stat` | Available |
-| `/proc/uptime` | Available |
+Whether cgroup files are exposed depends on your gVisor configuration:
 
-### What gVisor Does NOT Virtualize
+### GKE Autopilot / Managed gVisor
+Some managed gVisor environments expose cgroup files. Check if these exist in your container:
+```bash
+ls /sys/fs/cgroup/cpu.stat
+ls /sys/fs/cgroup/cpuacct/cpuacct.usage
+```
 
-| Resource | gVisor Behavior |
-|----------|-----------------|
-| `/sys/fs/cgroup/*` | Not exposed |
-| `getloadavg()` | Returns 0 |
-| `/proc/stat` | Returns all zeros |
-| `/proc/cpuinfo` | Shows host CPU count |
+### Self-managed gVisor
+Configure gVisor to expose cgroups by enabling the cgroupfs option. See [gVisor cgroup documentation](https://gvisor.dev/docs/user_guide/compatibility/linux/cgroups/).
 
-## Detailed Findings
+## Fallback Behavior
 
-### Memory Detection (Works)
+If cgroup files are not available, the library falls back gracefully:
+
+| Metric | Behavior without cgroups |
+|--------|-------------------------|
+| `cpuLoadAvg()` | Returns 0 |
+| `cpuLimitCores()` | Returns `SYSRES_CPU_CORES` env var, or host CPU count |
+| `memUsage()` | Works (uses `/proc/meminfo`) |
+| `memoryLimitBytes()` | Works (uses `/proc/meminfo` MemTotal) |
+| `memoryUsedBytes()` | Works (uses `/proc/meminfo` calculation) |
+
+## Workaround: SYSRES_CPU_CORES Environment Variable
+
+For gVisor environments where cgroups are not exposed, you can manually set the CPU limit:
+
+```yaml
+# Kubernetes deployment
+env:
+  - name: SYSRES_CPU_CORES
+    value: "0.5"  # Match your container's CPU limit
+```
+
+This allows `cpuLimitCores()` to return the correct value even without cgroup detection.
+
+## Memory Monitoring
+
+**Memory monitoring works correctly** in all gVisor configurations.
 
 gVisor virtualizes `/proc/meminfo` to reflect container memory limits:
 
-| Source | Value in gVisor | Expected | Accurate? |
-|--------|-----------------|----------|-----------|
-| `/proc/meminfo` MemTotal | 262144 kB (256 MB) | 256Mi | **Yes** |
+| Source | gVisor Behavior |
+|--------|-----------------|
+| `/proc/meminfo` MemTotal | Shows container memory limit |
+| `/proc/meminfo` MemAvailable | Shows available memory |
 
-The library's memory functions work correctly in gVisor without any configuration.
+## Testing in gVisor
 
-### CPU Limit Detection
+```dart
+import 'package:system_resources_2/system_resources_2.dart';
 
-gVisor does not expose cgroups, so CPU limit cannot be auto-detected. The library returns host CPU count instead of container limit:
+void main() async {
+  await SystemResources.init();
 
-| Source | Value in gVisor | Expected | Accurate? |
-|--------|-----------------|----------|-----------|
-| `/proc/cpuinfo` processors | 2 (host) | 1 (limit) | **No** |
-| `nproc` | 2 (host) | 1 (limit) | **No** |
+  print('Container: ${SystemResources.isContainerEnv()}');
+  print('Cgroup version: ${SystemResources.cgroupVersion()}');
 
-### CPU Load Average (Not Supported)
+  // If cgroupVersion is none, cgroups are not exposed
+  if (SystemResources.cgroupVersion() == CgroupVersion.none) {
+    print('Warning: Cgroups not detected. CPU monitoring may not work.');
+    print('Set SYSRES_CPU_CORES env var for accurate CPU limit.');
+  }
 
-**Warning:** `cpuLoadAvg()` always returns 0 in gVisor.
-
-gVisor does not virtualize the `getloadavg()` syscall. There is no workaround within this library.
-
-**For CPU usage monitoring in gVisor, use external solutions:**
-- Prometheus with cAdvisor
-- Kubernetes Metrics API (`kubectl top`)
-- Cloud provider monitoring (e.g., Google Cloud Monitoring)
-
-## Live Test Results
-
-Tested on GKE cluster with gVisor runtime.
-
-### Test Configuration
-
-```yaml
-resources:
-  requests:
-    cpu: "250m"
-    memory: "256Mi"
-  limits:
-    cpu: "1"
-    memory: "256Mi"
+  // Memory always works
+  print('Memory: ${SystemResources.memUsage() * 100}%');
+  print('Memory limit: ${SystemResources.memoryLimitBytes()} bytes');
+}
 ```
 
-### Results Comparison
+## Recommendations
 
-| Metric | kubectl top (actual) | Library Output |
-|--------|---------------------|----------------|
-| CPU Usage | 950-976m (~97%) | 0% (not supported) |
-| CPU Limit | 1000m (1 core) | 2.00 cores (host value) |
-| Memory Limit | 256Mi | 256 MB (correct) |
-| Memory Used | 163Mi | 102 MB (different calculation) |
+1. **Check cgroup availability** - Use `cgroupVersion()` to detect if cgroups are exposed
+2. **Set SYSRES_CPU_CORES** - For gVisor without cgroups, set this env var to your CPU limit
+3. **Memory monitoring works** - No special configuration needed
+4. **Consider external monitoring** - For production, use Prometheus/kubectl top as a backup
 
-### Key Observations
+## External Monitoring Alternatives
 
-1. **CPU load** always returns 0 regardless of actual usage (~97% actual load) - not supported
-2. **CPU limit** returns host cores instead of container limit
-3. **Memory limit** works correctly via gVisor's virtualized `/proc/meminfo`
-4. **Memory usage** differs slightly due to calculation methods (library excludes buffers/cached)
-
-## Recommendations for gVisor
-
-1. **Use memory monitoring** - Works correctly without any configuration
-2. **Use external CPU monitoring** - Prometheus, Kubernetes Metrics API, or cloud provider solutions
-3. **Don't rely on `cpuLoadAvg()`** - Always returns 0 in gVisor
+If cgroup-based monitoring doesn't work in your gVisor environment:
+- **Prometheus with cAdvisor** - Container metrics from host perspective
+- **Kubernetes Metrics API** - `kubectl top pod`
+- **Cloud provider monitoring** - GCP Cloud Monitoring, AWS CloudWatch, etc.
