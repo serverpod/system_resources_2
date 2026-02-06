@@ -69,6 +69,13 @@ class SystemResources {
     if (_initialized) return;
     _initialized = true;
 
+    if (Platform.isWindows) {
+      stderr.writeln(
+        'WARNING: CPU and memory usage metrics are not supported on Windows.',
+      );
+      return;
+    }
+
     if (PlatformDetector.detectPlatform() == DetectedPlatform.macOS) {
       MacOsNative.init();
     }
