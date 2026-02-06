@@ -22,8 +22,8 @@ typedef GetMemoryLimitBytes = int Function();
 typedef GetMemoryUsedBytesNative = Int64 Function();
 typedef GetMemoryUsedBytes = int Function();
 
-/// macOS FFI wrapper for system resources.
-class MacOsFfi {
+/// macOS native library wrapper for system resources.
+class MacOsNative {
   static DynamicLibrary? _lib;
   static GetCpuLoad? _getCpuLoad;
   static GetCpuLimitCores? _getCpuLimitCores;
@@ -42,7 +42,7 @@ class MacOsFfi {
   static void init() {
     if (_initialized) return;
     if (!Platform.isMacOS) {
-      throw StateError('MacOsFfi is only supported on macOS');
+      throw StateError('MacOsNative is only supported on macOS');
     }
 
     _lib = _loadLibrary();
@@ -180,7 +180,7 @@ class MacOsFfi {
   static void _ensureInitialized() {
     if (!_initialized) {
       throw StateError(
-        'MacOsFfi not initialized. Call SystemResources.init() first.',
+        'MacOsNative not initialized. Call SystemResources.init() first.',
       );
     }
   }

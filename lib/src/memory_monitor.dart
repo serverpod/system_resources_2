@@ -1,14 +1,14 @@
 import 'dart:io';
 
-import 'cgroup_detector.dart';
+import 'platform_detector.dart';
 
 /// Memory monitoring via cgroup files, with `/proc/meminfo` fallback.
-class CgroupMemory {
+class MemoryMonitor {
   /// Falls back to `/proc/meminfo` when cgroup file is "max" or unreadable.
   static int readV2LimitBytes() {
     try {
       final content =
-          File(CgroupDetector.cgroupV2MemoryMax).readAsStringSync().trim();
+          File(PlatformDetector.cgroupV2MemoryMax).readAsStringSync().trim();
       if (content == 'max') return readProcMemTotal();
       return int.tryParse(content) ?? 0;
     } catch (_) {}
@@ -19,7 +19,7 @@ class CgroupMemory {
   static int readV1LimitBytes() {
     try {
       final content =
-          File(CgroupDetector.cgroupV1MemoryLimit).readAsStringSync().trim();
+          File(PlatformDetector.cgroupV1MemoryLimit).readAsStringSync().trim();
       final limit = int.tryParse(content);
       if (limit != null) {
         if (limit > 9000000000000000000) return readProcMemTotal();
@@ -32,7 +32,7 @@ class CgroupMemory {
   static int readV2UsedBytes() {
     try {
       final content =
-          File(CgroupDetector.cgroupV2MemoryCurrent).readAsStringSync().trim();
+          File(PlatformDetector.cgroupV2MemoryCurrent).readAsStringSync().trim();
       return int.tryParse(content) ?? 0;
     } catch (_) {}
     return readProcMemUsed();
@@ -41,7 +41,7 @@ class CgroupMemory {
   static int readV1UsedBytes() {
     try {
       final content =
-          File(CgroupDetector.cgroupV1MemoryUsage).readAsStringSync().trim();
+          File(PlatformDetector.cgroupV1MemoryUsage).readAsStringSync().trim();
       return int.tryParse(content) ?? 0;
     } catch (_) {}
     return readProcMemUsed();
@@ -49,7 +49,7 @@ class CgroupMemory {
 
   static int readProcMemTotal() {
     try {
-      final content = File(CgroupDetector.procMeminfo).readAsStringSync();
+      final content = File(PlatformDetector.procMeminfo).readAsStringSync();
       for (final line in content.split('\n')) {
         if (line.startsWith('MemTotal:')) {
           final parts = line.split(RegExp(r'\s+'));
@@ -65,7 +65,7 @@ class CgroupMemory {
 
   static int readProcMemUsed() {
     try {
-      final content = File(CgroupDetector.procMeminfo).readAsStringSync();
+      final content = File(PlatformDetector.procMeminfo).readAsStringSync();
       int? memTotal;
       int? memAvailable;
 

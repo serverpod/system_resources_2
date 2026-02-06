@@ -32,7 +32,7 @@ enum DetectedPlatform {
 }
 
 /// Detects cgroup version, platform, and container environment.
-class CgroupDetector {
+class PlatformDetector {
   static DetectedPlatform? _cachedPlatform;
   static bool? _cachedIsContainer;
   static String? _cachedCgroupDir;

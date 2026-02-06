@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'cgroup_detector.dart';
+import 'platform_detector.dart';
 
 /// CPU monitoring using cgroup metrics and /proc/loadavg fallback.
 ///
@@ -8,7 +8,7 @@ import 'cgroup_detector.dart';
 /// from `SystemResources` via a flat switch on [DetectedPlatform].
 ///
 /// For Linux hosts without cgroups, falls back to `/proc/loadavg`.
-class CgroupCpu {
+class CpuMonitor {
   /// Previous CPU usage reading for delta calculation
   static int? _previousMicros;
   static DateTime? _previousTime;
@@ -23,7 +23,7 @@ class CgroupCpu {
   /// Returns 0 if unable to read.
   static int readV2UsageMicros() {
     try {
-      final content = File(CgroupDetector.cgroupV2CpuStat).readAsStringSync();
+      final content = File(PlatformDetector.cgroupV2CpuStat).readAsStringSync();
       for (final line in content.split('\n')) {
         if (line.startsWith('usage_usec')) {
           final parts = line.split(' ');
@@ -43,8 +43,8 @@ class CgroupCpu {
   /// Returns 0 if unable to read.
   static int readV1UsageMicros() {
     for (final path in [
-      CgroupDetector.cgroupV1CpuAcctUsage,
-      CgroupDetector.cgroupV1CpuAcctUsageAlt,
+      PlatformDetector.cgroupV1CpuAcctUsage,
+      PlatformDetector.cgroupV1CpuAcctUsageAlt,
     ]) {
       try {
         final file = File(path);
@@ -70,7 +70,7 @@ class CgroupCpu {
   static int readV2LimitMillicores() {
     try {
       final content =
-          File(CgroupDetector.cgroupV2CpuMax).readAsStringSync().trim();
+          File(PlatformDetector.cgroupV2CpuMax).readAsStringSync().trim();
       final parts = content.split(' ');
       if (parts.length >= 2) {
         if (parts[0] == 'max') return -1; // Unlimited
@@ -92,12 +92,12 @@ class CgroupCpu {
   /// Returns -1 if unlimited or unable to determine.
   static int readV1LimitMillicores() {
     final quotaPaths = [
-      CgroupDetector.cgroupV1CpuQuota,
-      CgroupDetector.cgroupV1CpuQuotaAlt,
+      PlatformDetector.cgroupV1CpuQuota,
+      PlatformDetector.cgroupV1CpuQuotaAlt,
     ];
     final periodPaths = [
-      CgroupDetector.cgroupV1CpuPeriod,
-      CgroupDetector.cgroupV1CpuPeriodAlt,
+      PlatformDetector.cgroupV1CpuPeriod,
+      PlatformDetector.cgroupV1CpuPeriodAlt,
     ];
 
     for (var i = 0; i < quotaPaths.length; i++) {
@@ -131,7 +131,7 @@ class CgroupCpu {
   /// First value is 1-minute load average.
   static double readProcLoadAvg() {
     try {
-      final content = File(CgroupDetector.procLoadAvg).readAsStringSync();
+      final content = File(PlatformDetector.procLoadAvg).readAsStringSync();
       final parts = content.split(' ');
       if (parts.isNotEmpty) {
         final loadAvg = double.tryParse(parts[0]);
