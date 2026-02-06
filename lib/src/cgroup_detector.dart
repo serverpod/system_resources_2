@@ -35,14 +35,20 @@ enum DetectedPlatform {
 class CgroupDetector {
   static DetectedPlatform? _cachedPlatform;
   static bool? _cachedIsContainer;
+  static String? _cachedCgroupDir;
 
-  /// Cgroup v2 paths
-  static const cgroupV2CpuStat = '/sys/fs/cgroup/cpu.stat';
-  static const cgroupV2CpuMax = '/sys/fs/cgroup/cpu.max';
-  static const cgroupV2MemoryCurrent = '/sys/fs/cgroup/memory.current';
-  static const cgroupV2MemoryMax = '/sys/fs/cgroup/memory.max';
+  static const cgroupV2Mount = '/sys/fs/cgroup';
 
-  /// Cgroup v1 paths
+  /// Resolved from the process's actual cgroup dir (see [resolveCgroupDir]).
+  static String get cgroupV2CpuStat => '${resolveCgroupDir()}/cpu.stat';
+  static String get cgroupV2CpuMax => '${resolveCgroupDir()}/cpu.max';
+  static String get cgroupV2MemoryCurrent =>
+      '${resolveCgroupDir()}/memory.current';
+  static String get cgroupV2MemoryMax => '${resolveCgroupDir()}/memory.max';
+
+  /// Root-level path for initial v2 detection only (always exists on v2).
+  static const _cgroupV2RootCpuStat = '/sys/fs/cgroup/cpu.stat';
+
   static const cgroupV1CpuAcctUsage = '/sys/fs/cgroup/cpuacct/cpuacct.usage';
   static const cgroupV1CpuAcctUsageAlt =
       '/sys/fs/cgroup/cpu,cpuacct/cpuacct.usage';
@@ -57,22 +63,19 @@ class CgroupDetector {
   static const cgroupV1MemoryLimit =
       '/sys/fs/cgroup/memory/memory.limit_in_bytes';
 
-  /// Host fallback paths
   static const procMeminfo = '/proc/meminfo';
   static const procStat = '/proc/stat';
   static const procLoadAvg = '/proc/loadavg';
 
-  /// Detects the runtime platform and cgroup environment.
-  ///
-  /// Combines OS detection and cgroup version probing into a single
-  /// cached [DetectedPlatform] value used for dispatch.
+  static const procSelfCgroup = '/proc/self/cgroup';
+
   static DetectedPlatform detectPlatform() {
     if (_cachedPlatform != null) return _cachedPlatform!;
 
     if (Platform.isMacOS) {
       _cachedPlatform = DetectedPlatform.macOS;
     } else if (Platform.isLinux) {
-      if (File(cgroupV2CpuStat).existsSync()) {
+      if (File(_cgroupV2RootCpuStat).existsSync()) {
         _cachedPlatform = DetectedPlatform.linuxCgroupV2;
       } else if (File(cgroupV1CpuAcctUsage).existsSync() ||
           File(cgroupV1CpuAcctUsageAlt).existsSync()) {
@@ -87,23 +90,12 @@ class CgroupDetector {
     return _cachedPlatform!;
   }
 
-  /// Detects the cgroup version available on this system.
-  ///
-  /// Derived from [detectPlatform] for backward compatibility.
-  ///
-  /// Returns [CgroupVersion.v2] if cgroup v2 files are present,
-  /// [CgroupVersion.v1] if cgroup v1 files are present,
-  /// or [CgroupVersion.none] if no cgroups are detected.
   static CgroupVersion detectVersion() => switch (detectPlatform()) {
         DetectedPlatform.linuxCgroupV2 => CgroupVersion.v2,
         DetectedPlatform.linuxCgroupV1 => CgroupVersion.v1,
         _ => CgroupVersion.none,
       };
 
-  /// Returns true if running in a detected container environment.
-  ///
-  /// Container detection is based on the presence of cgroup memory limits.
-  /// Returns false on non-Linux platforms or when no container limit is set.
   static bool isContainerEnv() {
     if (_cachedIsContainer != null) return _cachedIsContainer!;
 
@@ -116,33 +108,69 @@ class CgroupDetector {
     return _cachedIsContainer!;
   }
 
-  /// Checks cgroup v2 memory.max for a container limit.
+  /// "max" = unlimited (host), numeric = container limit.
   static bool _detectContainerV2() {
     try {
       final content = File(cgroupV2MemoryMax).readAsStringSync().trim();
-      // "max" means unlimited (likely host), a number means container limit
       return content != 'max';
     } catch (_) {
       return false;
     }
   }
 
-  /// Checks cgroup v1 memory.limit_in_bytes for a container limit.
+  /// Values > 9e18 indicate no limit (host).
   static bool _detectContainerV1() {
     try {
       final limit =
           int.tryParse(File(cgroupV1MemoryLimit).readAsStringSync().trim());
-      // Very large values indicate no limit (host)
-      // Typically 9223372036854771712 or similar
       return limit != null && limit < 9000000000000000000;
     } catch (_) {
       return false;
     }
   }
 
-  /// Clears cached detection results. Useful for testing.
+  /// Resolves the process's cgroup v2 directory from `/proc/self/cgroup`.
+  ///
+  /// In containers: `0::/` -> `/sys/fs/cgroup`.
+  /// On hosts: `0::/user.slice/.../session.scope` -> full path where
+  /// memory controller files reside.
+  ///
+  /// See `docs/cgroup-path-resolution.md` for background.
+  static String resolveCgroupDir() {
+    if (_cachedCgroupDir != null) return _cachedCgroupDir!;
+
+    _cachedCgroupDir = _readCgroupDirFromProc() ?? cgroupV2Mount;
+    return _cachedCgroupDir!;
+  }
+
+  /// Parses `/proc/self/cgroup` for the v2 entry (`0::$PATH`).
+  static String? _readCgroupDirFromProc() {
+    try {
+      final content = File(procSelfCgroup).readAsStringSync();
+      for (final line in content.split('\n')) {
+        final trimmed = line.trim();
+        if (trimmed.isEmpty) continue;
+
+        // Format: hierarchy-ID:controller-list:cgroup-path
+        final parts = trimmed.split(':');
+        if (parts.length != 3) continue;
+
+        if (parts[0] == '0' && parts[1].isEmpty) {
+          final cgroupPath = parts[2];
+          if (cgroupPath == '/') return cgroupV2Mount;
+          final normalized = cgroupPath.endsWith('/')
+              ? cgroupPath.substring(0, cgroupPath.length - 1)
+              : cgroupPath;
+          return '$cgroupV2Mount$normalized';
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   static void clearCache() {
     _cachedPlatform = null;
     _cachedIsContainer = null;
+    _cachedCgroupDir = null;
   }
 }
