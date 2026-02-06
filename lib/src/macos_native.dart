@@ -120,8 +120,31 @@ class MacOsNative {
     if (homeDir.isNotEmpty) {
       final pubCachePath =
           Platform.environment['PUB_CACHE'] ?? '$homeDir/.pub-cache';
-      locations.add(
-          '$pubCachePath/hosted/pub.dev/system_resources_2/lib/build/$libName');
+      try {
+        final hostedDir = Directory('$pubCachePath/hosted/pub.dev');
+        if (hostedDir.existsSync()) {
+          final matches = hostedDir
+              .listSync()
+              .whereType<Directory>()
+              .where((d) {
+                final name = d.uri.pathSegments
+                    .lastWhere((s) => s.isNotEmpty, orElse: () => '');
+                return name.startsWith('system_resources_2-');
+              })
+              .toList()
+            ..sort((a, b) => _compareVersionedDirs(
+                  b.uri.pathSegments
+                      .lastWhere((s) => s.isNotEmpty, orElse: () => ''),
+                  a.uri.pathSegments
+                      .lastWhere((s) => s.isNotEmpty, orElse: () => ''),
+                ));
+          for (final dir in matches) {
+            locations.add('${dir.path}/lib/build/$libName');
+          }
+        }
+      } catch (_) {
+        // Ignore errors from directory listing (e.g. permission issues)
+      }
     }
 
     // Try each location
@@ -175,6 +198,24 @@ class MacOsNative {
   static int memoryUsedBytes() {
     _ensureInitialized();
     return _getMemoryUsedBytes!();
+  }
+
+  /// Compare two versioned directory names for sorting.
+  ///
+  /// Expects names like `system_resources_2-2.2.1`. Extracts the version
+  /// suffix and compares numerically by major.minor.patch.
+  static int _compareVersionedDirs(String a, String b) {
+    final aVerStr = a.split('system_resources_2-').last;
+    final bVerStr = b.split('system_resources_2-').last;
+    final aParts = aVerStr.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+    final bParts = bVerStr.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+    final len = aParts.length > bParts.length ? aParts.length : bParts.length;
+    for (var i = 0; i < len; i++) {
+      final av = i < aParts.length ? aParts[i] : 0;
+      final bv = i < bParts.length ? bParts[i] : 0;
+      if (av != bv) return av.compareTo(bv);
+    }
+    return 0;
   }
 
   static void _ensureInitialized() {
