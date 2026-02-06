@@ -157,7 +157,7 @@ jobs:
           cp "lib/build/$LIB_NAME" "$PKG_DIR/"
 
           # Compile to a native executable
-          dart compile exe /tmp/test_pub_cache.dart -o /tmp/test_pub_cache
+          dart compile exe /tmp/test_pub_cache.dart --packages=.dart_tool/package_config.json -o /tmp/test_pub_cache
 
           # Run from /tmp with only the fake pub cache available
           # HOME=/nonexistent ensures no real ~/.pub-cache is found
