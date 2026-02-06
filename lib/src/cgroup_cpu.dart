@@ -191,17 +191,10 @@ class CgroupCpu {
     int Function() limitMillicoresReader,
   ) {
     final millicores = getUsageMillicores(usageMicrosReader);
-    final limitMillicores = limitMillicoresReader();
-
     if (millicores <= 0) return 0.0;
 
-    if (limitMillicores > 0) {
-      return millicores / limitMillicores;
-    }
-
-    // If unlimited, calculate against host CPU count
-    final hostCores = Platform.numberOfProcessors;
-    return millicores / (hostCores * 1000);
+    final limitCores = getLimitCores(limitMillicoresReader);
+    return millicores / (limitCores * 1000);
   }
 
   /// Gets the CPU limit in cores (fractional).
