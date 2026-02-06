@@ -1,3 +1,7 @@
+## 2.2.1
+
+- Log warning to stderr when running on Windows or other unsupported platforms
+
 ## 2.2.0
 
 ### Pure Dart on Linux
