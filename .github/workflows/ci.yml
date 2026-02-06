@@ -133,6 +133,37 @@ jobs:
       - run: dart pub get
       - run: dart test
 
+      - name: Test pub cache fallback (AOT compiled binary)
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "arm64" ]; then LIB_ARCH="arm64"; else LIB_ARCH="x86_64"; fi
+          LIB_NAME="libsysres-darwin-${LIB_ARCH}.dylib"
+
+          # Create a minimal Dart script that uses the library
+          cat > /tmp/test_pub_cache.dart << 'SCRIPT'
+          import 'package:system_resources_2/system_resources_2.dart';
+          void main() {
+            SystemResources.init();
+            final mem = SystemResources.memUsage();
+            assert(mem > 0, 'Expected positive memory usage');
+            print('SUCCESS: memUsage=$mem');
+          }
+          SCRIPT
+
+          # Set up a fake pub cache with the versioned directory structure
+          FAKE_CACHE="/tmp/fake-pub-cache"
+          PKG_DIR="$FAKE_CACHE/hosted/pub.dev/system_resources_2-2.2.1/lib/build"
+          mkdir -p "$PKG_DIR"
+          cp "lib/build/$LIB_NAME" "$PKG_DIR/"
+
+          # Compile to a native executable
+          dart compile exe /tmp/test_pub_cache.dart --packages=.dart_tool/package_config.json -o /tmp/test_pub_cache
+
+          # Run from /tmp with only the fake pub cache available
+          # HOME=/nonexistent ensures no real ~/.pub-cache is found
+          cd /tmp
+          HOME=/nonexistent PUB_CACHE="$FAKE_CACHE" ./test_pub_cache
+
   test-container:
     name: test-container (${{ matrix.arch }})
     strategy:

@@ -1,3 +1,7 @@
+## 2.2.2
+
+- Fix pub cache fallback path missing version suffix for macOS native library loading in AOT-compiled binaries
+
 ## 2.2.1
 
 - Log warning to stderr when running on Windows or other unsupported platforms
