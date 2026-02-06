@@ -1,3 +1,31 @@
+## 2.2.0
+
+### Pure Dart on Linux
+
+- **Hybrid architecture**: Linux now uses pure Dart (reading `/proc` and cgroup filesystems directly), eliminating the need for native `.so` binaries. macOS continues to use FFI with native `.dylib` binaries.
+- **Removed Linux native binaries**: `libsysres-linux-*.so` files are no longer shipped, reducing package size and improving compatibility across Linux architectures.
+
+### Cgroup v1 Support
+
+- **Cgroup v1 (legacy hierarchy)**: CPU and memory monitoring now works on systems using cgroup v1 in addition to cgroup v2.
+
+### New APIs
+
+- `cgroupVersion()` - Returns detected cgroup version (v1, v2, or none)
+- `cpuLoad()` - CPU load as a fraction of the cgroup limit (delta-based)
+- `cpuUsageMillicores()` - CPU usage in millicores (delta-based)
+- `cpuUsageMicros()` - Raw cumulative CPU usage in microseconds
+- `cpuLimitMillicores()` - CPU limit in millicores
+- `clearState()` - Clears all cached platform/CPU state (useful for testing)
+- New exported enums: `CgroupVersion`, `DetectedPlatform`
+
+### Bug Fixes
+
+- Resolve process's actual cgroup path for memory metrics on native Linux hosts
+- Unify CPU load normalization to respect `SYSRES_CPU_CORES` environment variable
+- Use `DynamicLibrary.open` directly instead of `File.existsSync` for better compatibility
+- Improve native library compatibility with older glibc versions
+
 ## 2.1.1
 
 - Fix package directory structure to follow Dart conventions (rename `docs/` to `doc/`)

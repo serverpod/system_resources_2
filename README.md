@@ -59,6 +59,19 @@ Unlike the original implementation, **CPU monitoring works in gVisor**! This ver
 
 **Memory monitoring** also works correctly via gVisor's virtualized `/proc/meminfo`.
 
+> **Note:** gVisor does not expose cgroup CPU limit files (`cpu.max`), so `cpuLimitCores()` falls back to the host CPU count. To set the correct CPU limit manually, use the `SYSRES_CPU_CORES` environment variable:
+>
+ > ```yaml
+> # Kubernetes example
+> env:
+>   - name: SYSRES_CPU_CORES
+>     valueFrom:
+>       resourceFieldRef:
+>         resource: limits.cpu
+> ```
+>
+> This ensures `cpuLoadAvg()` and `cpuLimitCores()` return values normalized to your actual container limit.
+
 See [doc/GVISOR.md](doc/GVISOR.md) for details.
 
 ### Running
