@@ -4,6 +4,7 @@ import 'cpu_monitor.dart';
 import 'platform_detector.dart';
 import 'memory_monitor.dart';
 import 'macos_native.dart';
+import 'windows_native.dart';
 
 /// Provides easy access to system resources (CPU load, memory usage).
 ///
@@ -13,7 +14,7 @@ import 'macos_native.dart';
 ///
 /// ## Key Features
 ///
-/// - **Hybrid implementation** - Pure Dart on Linux, FFI on macOS
+/// - **Hybrid implementation** - Pure Dart on Linux, FFI on macOS and Windows
 /// - **gVisor compatible** - Works in gVisor environments (unlike getloadavg)
 /// - **Cgroup v1/v2 support** - Automatically detects and uses appropriate paths
 /// - **Graceful fallbacks** - Falls back to /proc for non-container environments
@@ -27,7 +28,7 @@ import 'macos_native.dart';
 /// - Works in gVisor (which doesn't support getloadavg)
 /// - Measures actual CPU consumption, not queue depth
 ///
-/// Note: [cpuLoad] requires two calls to calculate a delta. The first call
+/// Note: [cpuLoadAvg] requires two calls to calculate a delta. The first call
 /// returns 0.0 as there's no previous reading to compare against.
 ///
 /// ## Memory Monitoring
@@ -64,15 +65,14 @@ class SystemResources {
   ///
   /// On macOS, this loads the native library for FFI calls.
   ///
+  /// On Windows, this is a no-op; kernel32.dll is loaded lazily on first use.
+  ///
   /// It's safe to call this method multiple times.
   static Future<void> init() async {
     if (_initialized) return;
     _initialized = true;
 
     if (Platform.isWindows) {
-      stderr.writeln(
-        'WARNING: CPU and memory usage metrics are not supported on Windows.',
-      );
       return;
     }
 
@@ -101,7 +101,8 @@ class SystemResources {
   ///
   /// Returns [CgroupVersion.v2] for modern unified hierarchy,
   /// [CgroupVersion.v1] for legacy hierarchy, or [CgroupVersion.none]
-  /// if no cgroups are detected (e.g., on macOS or non-containerized Linux).
+  /// if no cgroups are detected (e.g., on macOS, Windows, or non-containerized
+  /// Linux).
   static CgroupVersion cgroupVersion() => PlatformDetector.detectVersion();
 
   // ---------------------------------------------------------------------------
@@ -138,10 +139,15 @@ class SystemResources {
   /// - **Linux host**: Reads 1-minute load average from `/proc/loadavg`
   ///   and normalizes by CPU count.
   /// - **macOS**: Uses native FFI (requires [init()] to be called first).
+  /// - **Windows**: Windows has no load average. Instead, the share of CPU
+  ///   time that was busy across all cores is compared between calls, so
+  ///   1.0 means all cores were fully busy since the previous call. The
+  ///   first call returns 0.0.
   ///
   /// Returns a value where 1.0 means 100% CPU utilization.
   static double cpuLoadAvg() => switch (PlatformDetector.detectPlatform()) {
         DetectedPlatform.macOS => _macOsCpuLoadAvg(),
+        DetectedPlatform.windows => WindowsNative.cpuLoadAvg(),
         DetectedPlatform.linuxCgroupV2 => CpuMonitor.getLoad(
             CpuMonitor.readV2UsageMicros,
             CpuMonitor.readV2LimitMillicores,
@@ -212,6 +218,7 @@ class SystemResources {
   /// expose cgroup limits.
   static double cpuLimitCores() => switch (PlatformDetector.detectPlatform()) {
         DetectedPlatform.macOS => _macOsCpuLimitCores(),
+        DetectedPlatform.windows => Platform.numberOfProcessors.toDouble(),
         DetectedPlatform.linuxCgroupV2 =>
           CpuMonitor.getLimitCores(CpuMonitor.readV2LimitMillicores),
         DetectedPlatform.linuxCgroupV1 =>
@@ -257,6 +264,7 @@ class SystemResources {
   /// On host, returns total system memory.
   static int memoryLimitBytes() => switch (PlatformDetector.detectPlatform()) {
         DetectedPlatform.macOS => _macOsMemoryLimitBytes(),
+        DetectedPlatform.windows => WindowsNative.memoryLimitBytes(),
         DetectedPlatform.linuxCgroupV2 => MemoryMonitor.readV2LimitBytes(),
         DetectedPlatform.linuxCgroupV1 => MemoryMonitor.readV1LimitBytes(),
         DetectedPlatform.linuxHost => MemoryMonitor.readProcMemTotal(),
@@ -269,6 +277,7 @@ class SystemResources {
   /// On host, returns system memory usage (MemTotal - MemAvailable).
   static int memoryUsedBytes() => switch (PlatformDetector.detectPlatform()) {
         DetectedPlatform.macOS => _macOsMemoryUsedBytes(),
+        DetectedPlatform.windows => WindowsNative.memoryUsedBytes(),
         DetectedPlatform.linuxCgroupV2 => MemoryMonitor.readV2UsedBytes(),
         DetectedPlatform.linuxCgroupV1 => MemoryMonitor.readV1UsedBytes(),
         DetectedPlatform.linuxHost => MemoryMonitor.readProcMemUsed(),
@@ -312,5 +321,6 @@ class SystemResources {
   static void clearState() {
     PlatformDetector.clearCache();
     CpuMonitor.clearState();
+    WindowsNative.clearState();
   }
 }

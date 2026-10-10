@@ -9,7 +9,7 @@ Provides easy access to system resources (CPU load, memory usage).
 
 ## Key Features
 
-- **Hybrid implementation**: Pure Dart on Linux, FFI on macOS
+- **Hybrid implementation**: Pure Dart on Linux, FFI on macOS and Windows
 - **gVisor compatible**: Works in gVisor environments (uses cgroup accounting, not getloadavg)
 - **Cgroup v1/v2 support**: Automatically detects and uses appropriate paths
 - **No native dependencies on Linux**: Pure Dart file I/O, no glibc requirements
@@ -20,6 +20,7 @@ Provides easy access to system resources (CPU load, memory usage).
 - **Dart SDK**: 3.5.0 or higher
 - **Linux**: No native dependencies (pure Dart implementation)
 - **macOS**: 10.15 (Catalina) or higher (uses pre-built dylibs)
+- **Windows**: 10 or higher (uses kernel32.dll via FFI, no native dependencies)
 - **Container detection**: Supports cgroups v1 and v2
 
 ## Usage
@@ -28,7 +29,7 @@ Provides easy access to system resources (CPU load, memory usage).
 import 'package:system_resources_2/system_resources_2.dart';
 
 void main() async {
-  // Initialize (required for macOS, no-op on Linux)
+  // Initialize (required for macOS, no-op on Linux and Windows)
   await SystemResources.init();
 
   // Check if running in a container
@@ -125,7 +126,7 @@ docker run --memory=256m --cpus=0.5 system_resources_test
 
 | Function | Description |
 |----------|-------------|
-| `init()` | Initialize library (required for macOS, no-op on Linux) |
+| `init()` | Initialize library (required for macOS, no-op on Linux and Windows) |
 | `isContainerEnv()` | Returns `true` if running in a container with cgroup limits |
 | `cgroupVersion()` | Returns detected cgroup version (v1, v2, or none) |
 | `cpuLoadAvg()` | CPU load normalized by available cores (container or host) |
@@ -161,9 +162,21 @@ docker run --memory=256m --cpus=0.5 system_resources_test
 
 Note: On macOS, `isContainerEnv()` always returns `false` as containers are not natively supported.
 
-### Windows
+### Windows (FFI with kernel32.dll)
 
-Not currently supported.
+| Function         | x64  | arm64 |
+|------------------|------|-------|
+| cpuLoadAvg       | ✅   | ✅    |
+| cpuLimitCores    | ✅   | ✅    |
+| memUsage         | ✅   | ✅    |
+| memoryLimitBytes | ✅   | ✅    |
+| memoryUsedBytes  | ✅   | ✅    |
+| isContainerEnv   | ✅   | ✅    |
+
+Note: kernel32.dll is part of the operating system, so no native binaries are
+needed. On Windows, `cpuLoadAvg()` reports the CPU busy fraction measured
+between calls (Windows has no load average), and `isContainerEnv()` always
+returns `false`.
 
 ## Architecture
 
@@ -171,16 +184,15 @@ Not currently supported.
 ┌─────────────────────────────────────────────────────────────┐
 │                    SystemResources API                       │
 ├─────────────────────────────────────────────────────────────┤
-│  Linux (Pure Dart)           │  macOS (FFI)                 │
-│  ├─ cgroup_cpu.dart          │  └─ macos_ffi.dart           │
-│  ├─ cgroup_memory.dart       │      └─ libsysres-darwin-*.  │
-│  └─ cgroup_detector.dart     │          dylib               │
-│      │                       │                               │
-│      ▼                       │                               │
-│  /sys/fs/cgroup/* (v1/v2)    │                               │
-│  /proc/loadavg (host)        │                               │
-│  /proc/meminfo (fallback)    │                               │
-└─────────────────────────────────────────────────────────────┘
+│  Linux (Pure Dart)           │  macOS (FFI)                 │  Windows (FFI)             │
+│  ├─ cgroup_cpu.dart          │  └─ macos_ffi.dart           │  └─ windows_native.dart    │
+│  ├─ cgroup_memory.dart       │      └─ libsysres-darwin-*.  │      └─ kernel32.dll       │
+│  └─ cgroup_detector.dart     │          dylib               │         GetSystemTimes    │
+│      │                       │                               │         GlobalMemory-     │
+│      ▼                       │                               │           StatusEx       │
+│  /sys/fs/cgroup/* (v1/v2)    │                               │                            │
+│  /proc/loadavg (host)        │                               │                            │
+│  /proc/meminfo (fallback)    │                               │                            │
 ```
 
 ## Contributing

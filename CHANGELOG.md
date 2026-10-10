@@ -1,3 +1,13 @@
+## 2.3.0
+
+### Windows Support
+
+- **Windows CPU monitoring**: `cpuLoadAvg()` now works on Windows. Since Windows has no load average, it uses `GetSystemTimes` (kernel32.dll FFI) to report the share of CPU time that was busy across all cores between calls, where 1.0 means all cores were fully busy. The first call returns 0.0.
+- **Windows memory monitoring**: `memoryLimitBytes()`, `memoryUsedBytes()` and `memUsage()` now work on Windows, reading physical memory via `GlobalMemoryStatusEx` (kernel32.dll FFI).
+- **No native binaries on Windows**: kernel32.dll ships with the operating system and is loaded lazily on first use; `init()` is a no-op.
+- `init()` no longer logs a warning on Windows.
+- New `DetectedPlatform.windows` enum value.
+
 ## 2.2.2
 
 - Fix pub cache fallback path missing version suffix for macOS native library loading in AOT-compiled binaries

@@ -18,6 +18,9 @@ enum DetectedPlatform {
   /// macOS — uses native FFI for all metrics.
   macOS,
 
+  /// Windows — uses kernel32 FFI for all metrics.
+  windows,
+
   /// Linux with cgroup v2 (unified hierarchy).
   linuxCgroupV2,
 
@@ -72,7 +75,9 @@ class PlatformDetector {
   static DetectedPlatform detectPlatform() {
     if (_cachedPlatform != null) return _cachedPlatform!;
 
-    if (Platform.isMacOS) {
+    if (Platform.isWindows) {
+      _cachedPlatform = DetectedPlatform.windows;
+    } else if (Platform.isMacOS) {
       _cachedPlatform = DetectedPlatform.macOS;
     } else if (Platform.isLinux) {
       if (File(_cgroupV2RootCpuStat).existsSync()) {

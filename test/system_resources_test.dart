@@ -35,7 +35,7 @@ void main() {
 
     test('memUsage returns a value between 0 and 1', () {
       // Works on both Linux (pure Dart) and macOS (FFI)
-      if (!Platform.isLinux && !Platform.isMacOS) {
+      if (!Platform.isLinux && !Platform.isMacOS && !Platform.isWindows) {
         expect(SystemResources.memUsage(), equals(0.0));
         print('Memory Usage: Not supported on ${Platform.operatingSystem}');
         return;
@@ -74,7 +74,7 @@ void main() {
         expect(cpuLoad, greaterThanOrEqualTo(0.0));
         expect(memUsage, greaterThanOrEqualTo(0.0));
 
-        if (Platform.isLinux || Platform.isMacOS) {
+        if (Platform.isLinux || Platform.isMacOS || Platform.isWindows) {
           expect(memUsage, lessThanOrEqualTo(1.0));
         }
       }
@@ -147,8 +147,8 @@ void main() {
     });
 
     test('memoryLimitBytes returns a positive value', () {
-      // Works on Linux (pure Dart) and macOS (FFI)
-      if (!Platform.isLinux && !Platform.isMacOS) {
+      // Works on Linux (pure Dart), macOS (FFI), and Windows (FFI)
+      if (!Platform.isLinux && !Platform.isMacOS && !Platform.isWindows) {
         expect(SystemResources.memoryLimitBytes(), equals(0));
         return;
       }
@@ -163,8 +163,8 @@ void main() {
 
     test('memoryUsedBytes returns a positive value less than or equal to limit',
         () {
-      // Works on Linux (pure Dart) and macOS (FFI)
-      if (!Platform.isLinux && !Platform.isMacOS) {
+      // Works on Linux (pure Dart), macOS (FFI), and Windows (FFI)
+      if (!Platform.isLinux && !Platform.isMacOS && !Platform.isWindows) {
         expect(SystemResources.memoryUsedBytes(), equals(0));
         return;
       }
@@ -182,7 +182,7 @@ void main() {
     });
 
     test('memUsage equals memoryUsedBytes / memoryLimitBytes', () {
-      if (!Platform.isLinux && !Platform.isMacOS) {
+      if (!Platform.isLinux && !Platform.isMacOS && !Platform.isWindows) {
         return;
       }
 
